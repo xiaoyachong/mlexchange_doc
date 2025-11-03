@@ -8,25 +8,25 @@ With the native Docker worker type, here's the execution flow:
 ┌──────────────────────────────────────────────────────────┐
 │ Host Machine                                             │
 │                                                          │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │ Prefect Docker Worker Container                    │ │
-│  │ (prefecthq/prefect:3.4.2-python3.11)              │ │
-│  │                                                    │ │
-│  │  - Runs launch_docker flow                        │ │
-│  │  - Has /var/run/docker.sock mounted               │ │
-│  │  - Executes: docker run autoencoder_image ...     │ │
-│  │                                                    │ │
-│  └────────────┬───────────────────────────────────────┘ │
-│               │ Uses docker socket                      │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ Prefect Docker Worker Container                    │  │
+│  │ (prefecthq/prefect:3.4.2-python3.11)               │  │
+│  │                                                    │  │
+│  │  - Runs launch_docker flow                         │  │
+│  │  - Has /var/run/docker.sock mounted                │  │
+│  │  - Executes: docker run autoencoder_image ...      │  │
+│  │                                                    │  │
+│  └────────────┬───────────────────────────────────────┘  │
+│               │ Uses docker socket                       │
 │               ▼                                          │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │ Autoencoder Container (Sibling, not nested!)      │ │
-│  │ (your_autoencoder_image:tag)                      │ │
-│  │                                                    │ │
-│  │  - Runs your ML training code                     │ │
-│  │  - Has data volumes mounted                       │ │
-│  │                                                    │ │
-│  └────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ Autoencoder Container (Sibling, not nested!)       │  │
+│  │ (your_autoencoder_image:tag)                       │  │
+│  │                                                    │  │
+│  │  - Runs your ML training code                      │  │
+│  │  - Has data volumes mounted                        │  │
+│  │                                                    │  │
+│  └────────────────────────────────────────────────────┘  │
 │                                                          │
 └──────────────────────────────────────────────────────────┘
 ```
