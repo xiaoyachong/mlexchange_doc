@@ -1,0 +1,10 @@
+FROM prefecthq/prefect:3.4.2-python3.11
+
+# Install Podman CLI from Debian's official repositories
+RUN apt-get update && \
+    apt-get install -y \
+    podman \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify Podman CLI is installed
+RUN podman --version

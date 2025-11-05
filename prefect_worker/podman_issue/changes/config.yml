@@ -1,0 +1,29 @@
+# MLExchange Job Configuration
+# Default HPC type to use
+#hpc_type: "als"
+hpc_type: "nsls-ii"
+
+# Configuration for different job types
+
+# Conda environment settings
+conda:
+  conda_env_name:
+    pytorch_autoencoder: "mlex_pytorch_autoencoders"
+    pca: "mlex_dimension_reduction_pca"
+    umap: "mlex_dimension_reduction_umap"
+    clustering: "mlex_clustering"
+
+# Docker/Podman container settings
+container:
+  volumes:
+    - "/Users/xiaoyachong/Documents/3RSE/mlex_data_clinic/data/tiled_storage:/tiled_storage"
+  network: "mle_net"
+
+# Slurm job scheduler settings
+slurm:
+  num_nodes: 1
+  partitions: '["p_cpu1", "p_cpu2"]'
+  reservations: '["r_cpu1", "r_cpu2"]'
+  max_time: "1:00:00"  # Format: HH:MM:SS
+  forward_ports: '["8888:8888"]'
+  submission_ssh_key: "~/.ssh/id_rsa"

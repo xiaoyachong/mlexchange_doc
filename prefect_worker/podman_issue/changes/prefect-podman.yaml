@@ -1,0 +1,37 @@
+name: mlex_prefect_worker_podman
+prefect-version: 3.4.2
+
+build: null
+push: null
+
+pull:
+- prefect.deployments.steps.set_working_directory:
+    directory: "{{ $CONTAINER_WORK_DIR }}"
+
+deployments:
+- name: launch_podman
+  version: 0.1.0
+  tags: []
+  concurrency_limit: null
+  description: Launch podman container (using Docker worker type)
+  entrypoint: flows/podman/podman_flows.py:launch_podman
+  parameters: {}
+  work_pool:
+    name: podman_pool
+    work_queue_name: default-queue
+    job_variables:
+      image: "prefect-with-podman:latest"
+      image_pull_policy: "Never"
+      volumes:
+        # Mount the Podman socket into the container
+        - "{{ $PODMAN_SOCKET_PATH }}:/run/podman/podman.sock"
+        - "{{ $PREFECT_WORK_DIR }}:{{ $CONTAINER_WORK_DIR }}"
+      env:
+        PYTHONPATH: "{{ $CONTAINER_WORK_DIR }}"
+        CONTAINER_WORK_DIR: "{{ $CONTAINER_WORK_DIR }}"
+        PREFECT_WORK_DIR: "{{ $PREFECT_WORK_DIR }}"
+        # Tell Podman CLI to use the mounted socket
+        CONTAINER_HOST: "unix:///run/podman/podman.sock"
+      auto_remove: true
+      stream_output: true
+  schedules: []

@@ -1,0 +1,67 @@
+name: mlex_prefect_worker
+prefect-version: 3.4.2
+
+# build section allows you to manage and build docker images
+build: null
+
+# push section allows you to manage if and how this project is uploaded to remote locations
+push: null
+
+# pull section allows you to provide instructions for cloning this project in remote locations
+pull:
+- prefect.deployments.steps.set_working_directory:
+    directory: '{{ $PREFECT_WORK_DIR }}'
+
+deployments:
+# - name: launch_podman
+#   version: 0.1.0
+#   tags: []
+#   concurrency_limit: null
+#   description: Launch podman container
+#   entrypoint: flows/podman/podman_flows.py:launch_podman
+#   parameters: {}
+#   work_pool:
+#     name: podman_pool
+#     work_queue_name: default-queue
+#     job_variables: {}
+#   schedules: []
+
+- name: launch_conda
+  version: 0.1.0
+  tags: []
+  concurrency_limit: null
+  description: Launch conda environment
+  entrypoint: flows/conda/conda_flows.py:launch_conda
+  parameters: {}
+  work_pool:
+    name: conda_pool
+    work_queue_name: default-queue
+    job_variables: {}
+  schedules: []
+
+- name: launch_slurm
+  version: 0.1.0
+  tags: []
+  concurrency_limit: null
+  description: Launch slurm job
+  entrypoint: flows/slurm/slurm_flows.py:launch_slurm
+  parameters: {}
+  work_pool:
+    name: slurm_pool
+    work_queue_name: default-queue
+    job_variables: {}
+  schedules: []
+
+
+- name: launch_parent_flow
+  version: 0.1.0
+  tags: []
+  concurrency_limit: null
+  description: Launch parent flow
+  entrypoint: flows/parent_flow.py:launch_parent_flow
+  parameters: {}
+  work_pool:
+    name: parent_pool
+    work_queue_name: default-queue
+    job_variables: {}
+  schedules: []
