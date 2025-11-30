@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  model-server:
+    build:
+      context: ./server
+    image: mlflow-model-server-simple:latest
+    container_name: mlflow-model-server-simple
+    ports:
+      - "5001:5001"
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_TRACKING_USERNAME=${MLFLOW_USERNAME:-}
+      - MLFLOW_TRACKING_PASSWORD=${MLFLOW_PASSWORD:-}
+      - MODEL_CACHE_DIR=/mlflow_cache
+      - PRELOAD_MODELS=pytorch_autoencoder_v0.0.5,umap_v1.0.0
+    volumes:
+      - model-cache:/mlflow_cache
+    networks:
+      - mlflow-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+volumes:
+  model-cache:
+    name: mlflow-model-cache
+
+networks:
+  mlflow-network:
+    external: true
