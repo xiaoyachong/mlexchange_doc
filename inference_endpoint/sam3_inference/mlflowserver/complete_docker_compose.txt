@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  # ===== Your existing services (mlflow, tiled, dash-app, etc.) =====
+  # ... keep all your existing services ...
+
+  # ===== SAM3 Inference Service =====
+  sam3-inference:
+    image: python:3.10-slim
+    container_name: sam3-inference
+    hostname: sam3-inference
+    
+    # Startup command: Install dependencies and serve model
+    command: >
+      bash -c "
+      echo '========================================' &&
+      echo 'SAM3 Inference Service Starting...' &&
+      echo '========================================' &&
+      echo 'Step 1: Installing dependencies...' &&
+      pip install --no-cache-dir \
+        mlflow[gateway]==2.22.0 \
+        requests \
+        torch==2.2.2 \
+        torchvision==0.17.2 \
+        transformers \
+        pillow==12.0.0 \
+        huggingface-hub \
+        numpy \
+      &&
+      echo 'Step 2: Starting MLflow model server...' &&
+      mlflow models serve \
+        -m 'models:/sam3-inference/latest' \
+        -p 5001 \
+        --host 0.0.0.0 \
+        --workers 2 \
+        --timeout 300 \
+        --env-manager local
+      "
+    
+    # Environment variables
+    environment:
+      # MLflow connection
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      
+      # Hugging Face authentication
+      - HF_TOKEN=${HF_TOKEN}
+      
+      # Model cache directories
+      - TRANSFORMERS_CACHE=/cache/transformers
+      - HF_HOME=/cache/huggingface
+      
+      # Python settings
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      
+      # SAM3 model name (optional override)
+      - SAM_MODEL_NAME=${SAM_MODEL_NAME:-facebook/sam3}
+    
+    # Port mapping
+    ports:
+      - "5001:5001"
+    
+    # Persistent cache for model weights
+    volumes:
+      - sam3-cache:/cache
+    
+    # Network configuration
+    networks:
+      - mlexchange  # Change to match your network name
+    
+    # Wait for MLflow to be ready
+    depends_on:
+      - mlflow
+    
+    # GPU configuration (requires nvidia-docker2)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1  # Use 1 GPU
+              capabilities: [gpu]
+        limits:
+          memory: 12G  # Limit RAM usage
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s  # Allow 90s for model loading
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ===== Volumes =====
+volumes:
+  # ... your existing volumes ...
+  
+  # SAM3 model cache
+  sam3-cache:
+    driver: local
+
+# ===== Networks =====
+networks:
+  mlexchange:
+    # If using existing network
+    external: true
+    
+    # OR if creating new network, use:
+    # driver: bridge

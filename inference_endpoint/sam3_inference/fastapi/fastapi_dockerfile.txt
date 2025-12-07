@@ -1,0 +1,61 @@
+# SAM3 FastAPI Server Dockerfile
+# Build: docker build -t sam3-fastapi:latest sam3_server/
+# Run: docker run -p 5001:5001 --gpus all -e HF_TOKEN=xxx sam3-fastapi:latest
+
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Set cache directories
+ENV TRANSFORMERS_CACHE=/cache/transformers \
+    HF_HOME=/cache/huggingface \
+    TORCH_HOME=/cache/torch
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3-pip \
+    python3.10-dev \
+    git \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/python3.10 /usr/bin/python
+
+# Create working directory
+WORKDIR /app
+
+# Copy requirements first (for better caching)
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY main.py .
+
+# Create cache directories
+RUN mkdir -p /cache/transformers /cache/huggingface /cache/torch \
+    && chmod -R 777 /cache
+
+# Create non-root user for security
+RUN useradd -m -u 1000 sam3user && \
+    chown -R sam3user:sam3user /app /cache
+
+# Switch to non-root user
+USER sam3user
+
+# Expose port
+EXPOSE 5001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD curl -f http://localhost:5001/health || exit 1
+
+# Run the application
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5001", "--workers", "1"]

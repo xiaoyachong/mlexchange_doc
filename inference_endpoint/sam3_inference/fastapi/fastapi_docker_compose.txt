@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # ===== Your existing services =====
+  # ... keep all your existing services ...
+
+  # ===== SAM3 FastAPI Inference Service =====
+  sam3-inference:
+    build:
+      context: ./sam3_server
+      dockerfile: Dockerfile
+    container_name: sam3-inference
+    hostname: sam3-inference
+    
+    # Environment variables
+    environment:
+      # Hugging Face authentication
+      - HF_TOKEN=${HF_TOKEN}
+      
+      # Model configuration
+      - SAM_MODEL_NAME=${SAM_MODEL_NAME:-facebook/sam3}
+      
+      # Cache directories
+      - TRANSFORMERS_CACHE=/cache/transformers
+      - HF_HOME=/cache/huggingface
+      - TORCH_HOME=/cache/torch
+      
+      # Python settings
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    
+    # Port mapping
+    ports:
+      - "5001:5001"
+    
+    # Persistent cache volume
+    volumes:
+      - sam3-cache:/cache
+    
+    # Network
+    networks:
+      - mlexchange  # Change to match your network name
+    
+    # GPU configuration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1  # Number of GPUs
+              capabilities: [gpu]
+        limits:
+          memory: 12G  # RAM limit
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ===== Volumes =====
+volumes:
+  # ... your existing volumes ...
+  
+  # SAM3 cache
+  sam3-cache:
+    driver: local
+
+# ===== Networks =====
+networks:
+  mlexchange:
+    external: true
+    # OR if creating new: driver: bridge
