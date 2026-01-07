@@ -1,0 +1,50 @@
+# MLExchange Job Configuration
+# Default worker configuration
+worker:
+  name: "als"    # Environment name ("als"->docker, "nersc"->sfapi, "nersc-slurm"->slurm, "nsls-ii"->podman, "conda"->conda)
+  type: "docker" # Execution type (should match the name)
+
+# Configuration for different job types
+
+# Conda environment settings
+conda:
+  conda_env_name:
+    DLSIA MSDNet_0.0.1: "dlsia"
+    DLSIA TUNet_0.0.1: "dlsia"
+    DLSIA TUNet3+_0.0.1: "dlsia"
+    DLSIA MSDNet_0.1.0: "dlsia_0.1.0"
+    DLSIA TUNet_0.1.0: "dlsia_0.1.0"
+    DLSIA TUNet3+_0.1.0: "dlsia_0.1.0"
+
+# Docker/Podman container settings
+container:
+  # Use environment variables for dynamic paths
+  # These will be expanded at runtime from .env file
+  volumes:
+    - "${TILED_STORAGE_DIR}:/tiled_storage"
+  network: "${CONTAINER_NETWORK}"
+
+# Slurm job scheduler settings
+slurm:
+  num_nodes: 1
+  partitions: '["p_cpu1", "p_cpu2"]'
+  reservations: '["r_cpu1", "r_cpu2"]'
+  max_time: "1:00:00"  # Format: HH:MM:SS
+  forward_ports: '["8888:8888"]'
+  submission_ssh_key: "~/.ssh/id_rsa"
+
+# SFAPI (NERSC Superfacility API) settings
+sfapi:
+  machine: "perlmutter"  # NERSC machine (perlmutter, cori)
+  queue: "realtime"      # SLURM queue/QOS (realtime, debug, preempt)
+  account: "als"         # NERSC account to charge
+  constraint: "cpu"      # Node constraint (cpu, gpu)
+  num_nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 64
+  max_time: "0:15:00"    # Format: HH:MM:SS
+  exclusive: true        # Request exclusive node access
+  working_dir: ""        # Working directory on NERSC (empty = default pscratch)
+  output_dir: ""         # Output log directory (empty = default pscratch/job_logs)
+  error_dir: ""          # Error log directory (empty = default pscratch/job_logs)
+  volumes: []            # Additional volume mounts for container

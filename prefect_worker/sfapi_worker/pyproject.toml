@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+    packages = ["flows/**/*"]
+
+[project]
+name = "mlexworker"
+version = "0.3.0"
+description = "MLexWorker is a Prefect process worker for running jobs in MLExchange"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.11"
+
+dependencies = [
+    "prefect==3.4.2",
+    "typer==0.15.4",
+    "mlflow==2.22.0",
+    "requests>=2.31.0",
+    "python-dotenv",
+    "sfapi-client>=0.4.0",
+    "authlib>=1.2.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pre-commit",
+    "flake8"
+]

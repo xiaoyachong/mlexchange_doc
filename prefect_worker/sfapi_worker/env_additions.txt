@@ -1,0 +1,8 @@
+# Add these lines to your .env file:
+
+# NERSC SFAPI Configuration
+# =========================
+# Path to file containing SFAPI client ID
+PATH_NERSC_CLIENT_ID=/path/to/nersc_client_id.txt
+# Path to file containing SFAPI private key (JSON format)
+PATH_NERSC_PRI_KEY=/path/to/nersc_private_key.json
