@@ -1,0 +1,92 @@
+# Common settings
+common:
+  dataset: "default"  # dataset identifier
+  network_type: "DLSIA TUNet"  # "DLSIA TUNet", "DLSIA MSDNet", or "DLSIA TUNet3+"
+
+# Model configurations organized by dataset
+models:
+  # ============= Default TUNet Model =============
+  default_dlsia_tunet:
+    experiment_name: "segmentation_tunet_exp"
+    model_name: "seg_tunet_model"
+    weights_path: "../models/tunet/tunet_weights.pth"
+    num_classes: 3
+    in_channels: 1
+    qlty_window: 64
+    image_size: [64, 64]
+    network_params:
+      depth: 4
+      base_channels: 32
+      growth_rate: 2
+      hidden_rate: 1
+      activation: "ReLU"
+      normalization: "BatchNorm2d"
+
+  # ============= Default MSDNet Model =============
+  default_dlsia_msdnet:
+    experiment_name: "segmentation_msdnet_exp"
+    model_name: "seg_msdnet_model"
+    weights_path: "../models/msdnet/msdnet_weights.pth"
+    num_classes: 3
+    in_channels: 1
+    qlty_window: 64
+    image_size: [64, 64]
+    network_params:
+      num_layers: 3
+      layer_width: 1
+      max_dilation: 5
+      activation: "ReLU"
+      normalization: "BatchNorm2d"
+      convolution: "Conv2d"
+
+  # ============= Default TUNet3+ Model =============
+  default_dlsia_tunet3+:
+    experiment_name: "segmentation_tunet3plus_exp"
+    model_name: "seg_tunet3plus_model"
+    weights_path: "../models/tunet3plus/tunet3plus_weights.pth"
+    num_classes: 3
+    in_channels: 1
+    qlty_window: 64
+    image_size: [64, 64]
+    network_params:
+      depth: 4
+      base_channels: 32
+      growth_rate: 2
+      hidden_rate: 1
+      carryover_channels: 32
+      activation: "ReLU"
+      normalization: "BatchNorm2d"
+
+  # ============= SMI Dataset TUNet Model =============
+  smi_dlsia_tunet:
+    experiment_name: "smi_segmentation_tunet_exp"
+    model_name: "smi_seg_tunet_model"
+    weights_path: "../models/smi/tunet_weights.pth"
+    num_classes: 3
+    in_channels: 1
+    qlty_window: 50
+    image_size: [50, 50]
+    network_params:
+      depth: 4
+      base_channels: 32
+      growth_rate: 2
+      hidden_rate: 1
+      activation: "ReLU"
+      normalization: "BatchNorm2d"
+
+  # ============= TRS Dataset TUNet Model =============
+  trs_dlsia_tunet:
+    experiment_name: "trs_segmentation_tunet_exp"
+    model_name: "trs_seg_tunet_model"
+    weights_path: "../models/trs/tunet_weights.pth"
+    num_classes: 2
+    in_channels: 1
+    qlty_window: 128
+    image_size: [128, 128]
+    network_params:
+      depth: 5
+      base_channels: 64
+      growth_rate: 2
+      hidden_rate: 1
+      activation: "ReLU"
+      normalization: "BatchNorm2d"
