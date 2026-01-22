@@ -1,0 +1,545 @@
+# SLURM Job Submission Guide
+
+## Quick Start
+
+### 1. Single Node (No SLURM needed)
+
+```bash
+# Make executable
+chmod +x run_single_node.sh
+
+# Run directly
+bash run_single_node.sh
+```
+
+### 2. Multi-Node with SLURM
+
+```bash
+# Make executable
+chmod +x run_slurm.sh
+
+# Submit job
+sbatch run_slurm.sh
+```
+
+---
+
+## Editing `run_slurm.sh` for Your System
+
+### Required Edits
+
+Open `run_slurm.sh` and change these lines:
+
+```bash
+#SBATCH --nodes=2              # How many nodes you want
+#SBATCH --gres=gpu:4           # How many GPUs per node
+#SBATCH --time=04:00:00        # Max time (HH:MM:SS)
+#SBATCH --partition=gpu        # Your cluster's GPU partition name
+#SBATCH --account=your_account # Your account/project name (if required)
+```
+
+### Common Configurations
+
+#### Configuration 1: 1 Node, 4 GPUs
+```bash
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:4
+#SBATCH --time=02:00:00
+```
+
+#### Configuration 2: 2 Nodes, 4 GPUs Each (8 GPUs Total)
+```bash
+#SBATCH --nodes=2
+#SBATCH --gres=gpu:4
+#SBATCH --time=04:00:00
+```
+
+#### Configuration 3: 4 Nodes, 8 GPUs Each (32 GPUs Total)
+```bash
+#SBATCH --nodes=4
+#SBATCH --gres=gpu:8
+#SBATCH --time=08:00:00
+```
+
+### Find Your Partition Name
+
+```bash
+# List available partitions
+sinfo
+
+# Example output:
+# PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
+# gpu          up   infinite      8  idle  node[01-08]
+# cpu          up   infinite     16  idle  node[09-24]
+```
+
+Use the partition name (e.g., `gpu`) in your script:
+```bash
+#SBATCH --partition=gpu
+```
+
+### Find Your Account (if required)
+
+```bash
+# List your accounts
+sacctmgr show user $USER format=account
+
+# Example output:
+#    Account
+# ----------
+# m1234
+# projectname
+```
+
+If you have an account, add this line:
+```bash
+#SBATCH --account=m1234
+```
+
+---
+
+## Submitting Jobs
+
+### Basic Submission
+
+```bash
+# Submit the job
+sbatch run_slurm.sh
+
+# Output:
+# Submitted batch job 12345678
+```
+
+### Submission with Custom Parameters
+
+You can override SBATCH parameters from command line:
+
+```bash
+# Use 4 nodes instead of 2
+sbatch --nodes=4 run_slurm.sh
+
+# Use different time limit
+sbatch --time=08:00:00 run_slurm.sh
+
+# Multiple overrides
+sbatch --nodes=8 --time=10:00:00 --partition=large_gpu run_slurm.sh
+```
+
+---
+
+## Monitoring Jobs
+
+### Check Job Status
+
+```bash
+# View your jobs
+squeue -u $USER
+
+# Example output:
+#  JOBID PARTITION     NAME     USER ST       TIME  NODES NODELIST
+# 123456       gpu sam3_inf username  R       1:23      2 node[01-02]
+```
+
+**Status codes:**
+- `PD` = Pending (waiting in queue)
+- `R` = Running
+- `CG` = Completing
+- `CD` = Completed
+- `F` = Failed
+
+### View Detailed Job Info
+
+```bash
+# Detailed info
+scontrol show job 123456
+
+# Resource usage
+sstat -j 123456
+
+# Accounting info (after completion)
+sacct -j 123456
+```
+
+### Watch Job Progress
+
+```bash
+# Watch queue (updates every 2 seconds)
+watch -n 2 squeue -u $USER
+
+# Follow output log in real-time
+tail -f logs/inference_123456.out
+
+# Follow error log
+tail -f logs/inference_123456.err
+```
+
+---
+
+## Viewing Results
+
+### While Job is Running
+
+```bash
+# View last 50 lines of output
+tail -n 50 logs/inference_123456.out
+
+# View last 50 lines of errors
+tail -n 50 logs/inference_123456.err
+
+# Follow output in real-time
+tail -f logs/inference_123456.out
+```
+
+### After Job Completes
+
+```bash
+# View entire output
+cat logs/inference_123456.out
+
+# View entire error log
+cat logs/inference_123456.err
+
+# Search for specific text
+grep "completed" logs/inference_123456.out
+grep "ERROR" logs/inference_123456.err
+```
+
+---
+
+## Canceling Jobs
+
+### Cancel a Single Job
+
+```bash
+scancel 123456
+```
+
+### Cancel All Your Jobs
+
+```bash
+scancel -u $USER
+```
+
+### Cancel by Name
+
+```bash
+scancel --name=sam3_inference
+```
+
+---
+
+## Troubleshooting
+
+### Job Stays in Pending (PD) State
+
+**Check why it's pending:**
+```bash
+squeue -u $USER -o "%.18i %.9P %.8j %.8u %.2t %.10M %.6D %R"
+```
+
+**Common reasons:**
+- `Resources` - Not enough nodes/GPUs available
+- `Priority` - Other jobs have higher priority
+- `QOSMaxNodePerJobLimit` - Requesting too many nodes
+- `AssocGrpCPURunMinutesLimit` - Account CPU limit reached
+
+**Solution:**
+- Wait for resources
+- Request fewer nodes
+- Check account limits: `sacctmgr show assoc user=$USER format=account,qos,maxjobs`
+
+### Job Fails Immediately
+
+**Check error log:**
+```bash
+cat logs/inference_123456.err
+```
+
+**Common issues:**
+
+1. **Wrong conda environment path**
+   ```
+   Error: conda environment not found
+   ```
+   Fix: Check the `CONDA_ENV` path in `run_slurm.sh`
+
+2. **Wrong input directory**
+   ```
+   Error: Input directory not found
+   ```
+   Fix: Check the `INPUT_DIR` path in `run_slurm.sh`
+
+3. **Module not found**
+   ```
+   Error: module 'conda' not found
+   ```
+   Fix: Check available modules with `module avail`
+
+4. **Permission denied**
+   ```
+   Error: Permission denied
+   ```
+   Fix: Make script executable: `chmod +x run_slurm.sh`
+
+### Out of Memory Error
+
+**Error in logs:**
+```
+RuntimeError: CUDA out of memory
+```
+
+**Solution:**
+Reduce batch size in `run_slurm.sh`:
+```bash
+BATCH_SIZE=1  # Already at minimum
+```
+
+Or request nodes with more GPU memory:
+```bash
+#SBATCH --constraint=gpu_mem:40gb
+```
+
+### Communication Timeout Between Nodes
+
+**Error in logs:**
+```
+Error: Connection timeout to master node
+```
+
+**Solution:**
+
+1. Check firewall settings (contact your HPC admin)
+2. Try a different port:
+   ```bash
+   export MASTER_PORT=29501  # Change in run_slurm.sh
+   ```
+3. Verify nodes can communicate:
+   ```bash
+   # In an interactive session
+   srun --nodes=2 --pty bash
+   # On node 0: hostname
+   # On node 1: ping <node0_hostname>
+   ```
+
+---
+
+## Advanced Usage
+
+### Interactive Session
+
+For debugging, request an interactive session:
+
+```bash
+# Request 2 nodes with 4 GPUs each
+salloc --nodes=2 --gres=gpu:4 --time=02:00:00 --partition=gpu
+
+# Once allocated, run manually:
+export MASTER_ADDR=$(scontrol show hostname $SLURM_NODELIST | head -n 1)
+export MASTER_PORT=29500
+
+srun torchrun \
+    --nproc_per_node=4 \
+    --nnodes=$SLURM_NNODES \
+    --node_rank=$SLURM_NODEID \
+    --master_addr=$MASTER_ADDR \
+    --master_port=$MASTER_PORT \
+    -m src.inference \
+    --input-dir /path/to/data \
+    --output-dir /path/to/results \
+    --patch-size 512 \
+    --batch-size 1 \
+    --num-workers 4 \
+    --confidence 0.5 \
+    --prompts "background" "cell"
+```
+
+### Array Jobs (Process Multiple Datasets)
+
+Create `run_slurm_array.sh`:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=sam3_array
+#SBATCH --nodes=2
+#SBATCH --gres=gpu:4
+#SBATCH --time=04:00:00
+#SBATCH --array=0-9           # Process 10 datasets
+#SBATCH --output=logs/inference_%A_%a.out
+#SBATCH --error=logs/inference_%A_%a.err
+
+# Define datasets
+DATASETS=(
+    "/path/to/dataset1"
+    "/path/to/dataset2"
+    "/path/to/dataset3"
+    # ... add more
+)
+
+# Select dataset for this array task
+INPUT_DIR=${DATASETS[$SLURM_ARRAY_TASK_ID]}
+OUTPUT_DIR="/path/to/results/dataset_${SLURM_ARRAY_TASK_ID}"
+
+# Run inference
+# ... rest of script ...
+```
+
+Submit:
+```bash
+sbatch run_slurm_array.sh
+```
+
+### Email Notifications
+
+Add to `run_slurm.sh`:
+
+```bash
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=your.email@example.com
+```
+
+You'll receive emails when job:
+- Begins
+- Completes
+- Fails
+
+---
+
+## Example Workflows
+
+### Workflow 1: Test on 1 Node, Then Scale to 4 Nodes
+
+```bash
+# Step 1: Test on 1 node
+sbatch --nodes=1 run_slurm.sh
+# Wait for completion, verify results
+
+# Step 2: Scale to 2 nodes
+sbatch --nodes=2 run_slurm.sh
+# Wait for completion, verify results
+
+# Step 3: Scale to 4 nodes (full run)
+sbatch --nodes=4 run_slurm.sh
+```
+
+### Workflow 2: Process Large Dataset Efficiently
+
+```bash
+# Split dataset into chunks
+# Process each chunk on separate nodes
+
+# Submit jobs for all chunks
+for chunk in chunk_*; do
+    sbatch --export=INPUT_DIR=$chunk run_slurm.sh
+done
+```
+
+### Workflow 3: Parameter Sweep
+
+```bash
+# Test different confidence thresholds
+for conf in 0.3 0.4 0.5 0.6 0.7; do
+    sbatch --export=CONFIDENCE=$conf run_slurm.sh
+done
+```
+
+---
+
+## Resource Estimation
+
+### How Many Nodes Do I Need?
+
+**Rule of thumb:**
+- Small dataset (<100 images): 1 node
+- Medium dataset (100-1000 images): 2-4 nodes
+- Large dataset (1000+ images): 4-8 nodes
+
+**Calculation:**
+```
+time_per_image = 10 seconds (typical)
+num_images = 500
+total_time_1_gpu = 500 * 10 = 5000 seconds = 83 minutes
+
+With 4 GPUs (1 node):   83 / 4 = ~21 minutes
+With 8 GPUs (2 nodes):  83 / 8 = ~10 minutes
+With 16 GPUs (4 nodes): 83 / 16 = ~5 minutes
+```
+
+### Cost Estimation
+
+**Check your allocation:**
+```bash
+# View remaining hours
+sshare -u $USER
+
+# View usage
+sacct -u $USER --starttime=2024-01-01 --format=JobID,JobName,Elapsed,NCPUS
+```
+
+---
+
+## Quick Reference Commands
+
+```bash
+# Submit job
+sbatch run_slurm.sh
+
+# Check status
+squeue -u $USER
+
+# View output
+tail -f logs/inference_<jobid>.out
+
+# Cancel job
+scancel <jobid>
+
+# View details
+scontrol show job <jobid>
+
+# Check account
+sacctmgr show user $USER format=account
+
+# List partitions
+sinfo
+
+# Check available resources
+sinfo -p gpu -o "%P %A %D"
+```
+
+---
+
+## Summary Table
+
+| Task | Command |
+|------|---------|
+| **Submit job** | `sbatch run_slurm.sh` |
+| **Check status** | `squeue -u $USER` |
+| **View output** | `tail -f logs/inference_<jobid>.out` |
+| **Cancel job** | `scancel <jobid>` |
+| **Interactive** | `salloc --nodes=2 --gres=gpu:4` |
+| **Override nodes** | `sbatch --nodes=4 run_slurm.sh` |
+| **Override time** | `sbatch --time=08:00:00 run_slurm.sh` |
+
+---
+
+## Need More Help?
+
+**Your HPC documentation:**
+```bash
+# Find your cluster's documentation
+# Usually at: https://docs.your-cluster.edu
+```
+
+**Contact HPC support:**
+```bash
+# Most HPCs have a help email or ticket system
+# Example: hpc-help@your-institution.edu
+```
+
+**Test your script:**
+```bash
+# Dry run (check syntax)
+bash -n run_slurm.sh
+
+# Test with minimal resources
+sbatch --nodes=1 --time=00:10:00 run_slurm.sh
+```
