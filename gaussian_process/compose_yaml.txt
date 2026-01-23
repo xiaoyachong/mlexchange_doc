@@ -1,0 +1,119 @@
+# Modified Docker Compose with MLflow Integration
+services:
+  dash_app:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    working_dir: /app
+    command: python dash_app.py
+    volumes:
+      - ./app:/app
+      - /mnt/MAESTROdata:/mnt/MAESTROdata:ro
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    ports:
+      - 80:80
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+
+  server:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    working_dir: /app
+    command: python server.py
+    volumes:
+      - ./app:/app
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    ports:
+      - 5550:5550
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+  
+  db:
+    image: postgres:16.1-alpine
+    restart: always
+    user: ${POSTGRES_USER}
+    env_file:
+      - .env
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD", "pg_isready" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  
+  redis:
+    image: redis
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MLflow Service
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.9.2
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Celery Worker
+  celery_worker:
+    container_name: celery_worker
+    build:
+      context: .
+      dockerfile: worker.Dockerfile
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    command: celery -A celery_workers.tasks worker --loglevel=info
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: [gpu]
+    volumes:
+      - ./app:/app
+      - /mnt/MAESTROdata:/mnt/MAESTROdata:ro
+    depends_on:
+      - redis
+      - mlflow
+
+volumes:
+  db-data:
+  mlflow-data:
