@@ -1,0 +1,16 @@
+blocks:
+  - name: XPS Timepix Operator
+    description: Real-time AP-XPS processor for Timepix data
+    operator:
+      class: tr_ap_xps.pipeline.xps_operator.XPSOperator
+      kwargs:
+        build_heatmaps: false
+    listeners:
+      - class: tr_ap_xps.timepix.XPSTimepixZMQListener
+        kwargs:
+          zmq_pub_address: "tcp://localhost"
+          zmq_pub_port: 5657
+    publishers:
+      - class: tr_ap_xps.websockets.XPSWSResultPublisher
+        kwargs:
+          ws_url: "ws://0.0.0.0:8001/xps_operator"
