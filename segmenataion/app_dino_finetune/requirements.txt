@@ -1,0 +1,9 @@
+# requirements.txt
+# For: python save_mlflow_wrapper.py
+#
+# Install:
+#   pip install -r requirements.txt
+
+mlflow==2.22.0
+pyyaml
+python-dotenv

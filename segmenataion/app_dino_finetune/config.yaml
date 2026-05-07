@@ -1,0 +1,95 @@
+# config.yaml
+# Central configuration for lightly_train MLflow pipeline
+# Used by: lightly_mlflow_wrapper.py, save_mlflow_wrapper.py, finetune.py
+
+# ---------------------------------------------------------------------------
+# MLflow
+# ---------------------------------------------------------------------------
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "petiole_segmentation"
+  # model names in the MLflow Model Registry
+  base_model_name:      "petiole_vitl16_eomt"
+  finetuned_model_name: "petiole_vitl16_eomt_ft"
+
+# ---------------------------------------------------------------------------
+# Checkpoint produced by the original lightly_train training run
+# ---------------------------------------------------------------------------
+checkpoint:
+  # Path to the .ckpt file saved by lightly_train
+  path: "out_slurm_vitl16-eomt-cityscapes_new/my_experiment_petiole_42tiff_7classes/checkpoints/best.ckpt"
+  # lightly_train model name used for the original training run.
+  # Passed as `model=` to train_semantic_segmentation for finetuning and
+  # logged to MLflow for traceability.
+  base_model: "dinov3/vitl16-eomt-cityscapes"
+
+# ---------------------------------------------------------------------------
+# Tiled data source
+# ---------------------------------------------------------------------------
+tiled:
+  uri:        ""          # set via env DATA_TILED_URI or fill in here
+  api_key:    null        # set via env DATA_TILED_KEY  or fill in here
+  images_key: "images"   # client[images_key][i] → numpy (H,W,3)
+  masks_key:  "masks"    # client[masks_key][i]  → numpy (H,W)
+  train_indices:
+    start: 0
+    end:   400
+  val_indices:
+    start: 400
+    end:   500
+
+# ---------------------------------------------------------------------------
+# Dataset / classes  (same as original lightly_train.train_semantic_segmentation call)
+# ---------------------------------------------------------------------------
+dataset:
+  classes:
+    0:   "background"
+    1:   "cortex"
+    2:   "Phloem Fibers"
+    3:   "Phloem"
+    4:   "Hydrated Xylem vessels"
+    5:   "Air-based Pith cells"
+    6:   "Water-based Pith cells"
+    7:   "Dehydrated Xylem vessels"
+    255: "unknown"
+  ignore_classes: [255]
+
+# ---------------------------------------------------------------------------
+# Finetuning hyper-parameters
+# ---------------------------------------------------------------------------
+finetune:
+  steps:      2000
+  batch_size: 1           # global batch size; per-GPU = batch_size / num_gpus
+  num_nodes:  1           # overridden by SLURM_NNODES at runtime
+  devices:    "auto"      # uses all visible GPUs per node
+  out_dir:    "out_finetuned/petiole_ft"
+  log_every_num_steps:     100
+  val_every_num_steps:     200
+  val_log_every_num_steps: 100
+  save_every_num_steps:    500
+  save_last: true
+  save_best:  true
+
+# ---------------------------------------------------------------------------
+# Pip requirements pinned for reproducibility
+# ---------------------------------------------------------------------------
+pip_requirements:
+  - "lightly-train==0.13.2"
+  - "numpy==2.2.6"
+  - "torch==2.9.1"
+  - "torchvision==0.24.1"
+  - "pytorch-lightning==2.6.0"
+  - "Pillow"
+  - "mlflow"
+  - "tiled"
+  - "python-dotenv"
+  - "pyyaml"
+
+# ---------------------------------------------------------------------------
+# Scratch / temp directory for PNG data dumps and MLflow artifact cache
+# Preferably a path on a shared filesystem (Lustre / GPFS) so all SLURM
+# nodes can see the files.  Falls back to system tmp if env var not set.
+# ---------------------------------------------------------------------------
+scratch:
+  data_dir:         "${SCRATCH}/lightly_finetune_data"
+  mlflow_cache_dir: "${SCRATCH}/mlflow_ckpt_cache"
