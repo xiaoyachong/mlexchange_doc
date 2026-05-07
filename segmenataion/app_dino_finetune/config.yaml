@@ -27,10 +27,14 @@ checkpoint:
 # Tiled data source
 # ---------------------------------------------------------------------------
 tiled:
-  uri:        ""          # set via env DATA_TILED_URI or fill in here
-  api_key:    null        # set via env DATA_TILED_KEY  or fill in here
-  images_key: "images"   # client[images_key][i] → numpy (H,W,3)
-  masks_key:  "masks"    # client[masks_key][i]  → numpy (H,W)
+  # After running:
+  #   tiled register http://localhost:8000 /tiled_storage
+  # Tiled mirrors the filesystem so client["images"] → /tiled_storage/images/
+  #                                    client["masks"]  → /tiled_storage/masks/
+  uri:        "http://localhost:8000"  # set via env DATA_TILED_URI or fill in here
+  api_key:    null                     # set via env DATA_TILED_KEY  or fill in here
+  images_key: "images"                 # folder name under /tiled_storage
+  masks_key:  "masks"                  # folder name under /tiled_storage
   train_indices:
     start: 0
     end:   400
