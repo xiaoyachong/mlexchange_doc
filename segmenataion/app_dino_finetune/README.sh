@@ -1,8 +1,8 @@
 # Setup & Usage
 # =============
 # Files in this directory:
-#   config_finetune.yaml       — configuration for finetune.py
-#   config_register.yaml       — configuration for save_mlflow_wrapper.py
+#   config_register.yaml       — configuration for save_mlflow_wrapper.py  (run FIRST)
+#   config_finetune.yaml       — configuration for finetune.py              (run SECOND)
 #   lightly_mlflow_wrapper.py  — MLflow pyfunc wrapper class (inference)
 #   save_mlflow_wrapper.py     — registers initial checkpoint to MLflow
 #   finetune.py                — downloads model, reads Tiled, finetunes, re-registers
@@ -15,8 +15,8 @@
 # Create a .env file in the project root with the following variables:
 
 # TILED_API_KEY=your_tiled_api_key
-# DATA_TILED_URI_IMAGES=http://tiled:8000/api/v1/metadata/images
-# DATA_TILED_URI_MASKS=http://tiled:8000/api/v1/metadata/masks
+# DATA_TILED_URI_IMAGES=http://tiled:8000/api/v1/metadata/recons/42tiff
+# DATA_TILED_URI_MASKS=http://tiled:8000/api/v1/metadata/recons/42tiff_7classes_masks
 # MLFLOW_TRACKING_URI_OUTSIDE=http://localhost:5000
 # MLFLOW_TRACKING_USERNAME=your_username
 # MLFLOW_TRACKING_PASSWORD=your_password
@@ -72,7 +72,19 @@ print('masks: ', list(masks))
 #   finetune.out_dir                       — must match finetune config out_dir
 
 # ---------------------------------------------------------------------------
-# 4. Run finetuning  (downloads pretrained weights automatically to cache)
+# 4. Register the pretrained lightly_train model to MLflow  (run FIRST)
+#    Env: mlflow_client  (lightweight — mlflow only, no torch needed)
+# ---------------------------------------------------------------------------
+
+conda create -n mlflow_client python=3.11 -y
+conda activate mlflow_client
+pip install -r requirements.txt
+
+source .env
+python save_mlflow_wrapper.py --config config_register.yaml
+
+# ---------------------------------------------------------------------------
+# 5. Run finetuning  (downloads pretrained model from MLflow, finetunes, re-registers)
 #    Env: lightly_finetune  (heavy — torch, lightly-train, tiled, etc.)
 # ---------------------------------------------------------------------------
 
@@ -94,17 +106,5 @@ srun --nodes=1 --ntasks-per-node=4 --gpus-per-task=1 \
 srun --nodes=2 --ntasks-per-node=4 --gpus-per-task=1 \
     python finetune.py --config config_finetune.yaml
 
-# After finetuning, the best checkpoint is saved to:
-#   <finetune.out_dir>/checkpoints/best.ckpt
-
-# ---------------------------------------------------------------------------
-# 5. Register the finetuned checkpoint to MLflow
-#    Env: mlflow_client  (lightweight — mlflow only, no torch needed)
-# ---------------------------------------------------------------------------
-
-conda create -n mlflow_client python=3.11 -y
-conda activate mlflow_client
-pip install -r requirements.txt
-
-source .env
-python save_mlflow_wrapper.py --config config_register.yaml
+# After finetuning, the finetuned best.ckpt is automatically registered
+# to MLflow as cfg["mlflow"]["finetuned_model_name"] by finetune.py itself.

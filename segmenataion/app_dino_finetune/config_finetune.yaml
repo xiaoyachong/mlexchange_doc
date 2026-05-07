@@ -7,7 +7,7 @@
 checkpoint:
   # Passed as `model=` to train_semantic_segmentation.
   # Downloaded automatically to cache_dir if not already present.
-  base_model: "dinov3/vitl16-eomt-cityscapes"
+  base_model: "dinov3/vits16-eomt-cityscapes"
 
 # ---------------------------------------------------------------------------
 # Cache directories for model weights and lightly_train internals
@@ -24,15 +24,10 @@ cache:
 # API key overridden by env TILED_API_KEY
 # ---------------------------------------------------------------------------
 tiled:
-  images_uri: "http://tiled:8000/api/v1/metadata/images"
-  masks_uri:  "http://tiled:8000/api/v1/metadata/masks"
-  api_key:    null
-  train_indices:
-    start: 0
-    end:   50
-  val_indices:
-    start: 50
-    end:   100
+  images_uri:   "http://tiled:8000/api/v1/metadata/recons/42tiff"
+  masks_uri:    "http://tiled:8000/api/v1/metadata/recons/42tiff_7classes_masks"
+  api_key:      null
+  val_split:    0.2   # 20% of data used for validation, 80% for training
 
 # ---------------------------------------------------------------------------
 # Dataset / classes
@@ -58,7 +53,9 @@ finetune:
   batch_size: 1           # global batch size; per-GPU = batch_size / num_gpus
   num_nodes:  1           # overridden by SLURM_NNODES at runtime
   devices:    "auto"      # uses all visible GPUs per node
-  out_dir:    "out_finetuned/petiole_ft"
+  # Final out_dir is resolved at runtime as: out_dir / base_model
+  # e.g. .../lightly_out_finetuned/dinov3/vitl16-eomt-cityscapes
+  out_dir: "/Users/xiaoyachong/Documents/3RSE/mlex_tomo_framework/data/lightly_out_finetuned"
   log_every_num_steps:     100
   val_every_num_steps:     200
   val_log_every_num_steps: 100

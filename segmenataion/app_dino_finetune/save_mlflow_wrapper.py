@@ -65,11 +65,11 @@ def register_to_mlflow(cfg: dict) -> tuple[str | None, str | None]:
     experiment_name  = cfg["mlflow"]["experiment_name"]
     model_name       = cfg["mlflow"]["base_model_name"]
     base_model       = cfg["checkpoint"]["base_model"]
-    out_dir          = cfg["finetune"]["out_dir"]
     pip_requirements = cfg["pip_requirements"]
 
-    # The finetuned checkpoint is saved by lightly_train to out_dir/checkpoints/best.ckpt
-    checkpoint_path = Path(out_dir) / "checkpoints" / "best.ckpt"
+    # Resolve final out_dir = out_dir / base_model  (same logic as finetune.py)
+    out_dir         = Path(cfg["finetune"]["out_dir"]) / base_model
+    checkpoint_path = out_dir / "checkpoints" / "best.ckpt"
 
     if not checkpoint_path.exists():
         logger.error(f"Checkpoint not found: {checkpoint_path}")

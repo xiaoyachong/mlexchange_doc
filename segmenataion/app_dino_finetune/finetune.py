@@ -76,6 +76,13 @@ def load_config(config_path: str = "config_finetune.yaml") -> dict:
         os.environ.get("SLURM_NNODES", cfg["finetune"]["num_nodes"])
     )
 
+    # Resolve final out_dir = out_dir / base_model
+    base_model = cfg["checkpoint"]["base_model"]
+    cfg["finetune"]["out_dir"] = str(
+        Path(cfg["finetune"]["out_dir"]) / base_model
+    )
+    logger.info(f"out_dir resolved to: {cfg['finetune']['out_dir']}")
+
     # Set lightly_train / torch cache directories
     cache = cfg["cache"]
     os.environ["LIGHTLY_TRAIN_CACHE_DIR"]       = cache["lightly_train_cache_dir"]
@@ -149,14 +156,13 @@ def prepare_data(cfg: dict) -> tuple[str, str, str, str]:
 
     tmp_root = Path(cfg["scratch"]["data_dir"])
 
-    train_idx = list(range(
-        cfg["tiled"]["train_indices"]["start"],
-        cfg["tiled"]["train_indices"]["end"],
-    ))
-    val_idx = list(range(
-        cfg["tiled"]["val_indices"]["start"],
-        cfg["tiled"]["val_indices"]["end"],
-    ))
+    # Split indices using val_split (e.g. 0.2 = 20% val, 80% train)
+    total   = len(tiled_images)
+    val_n   = max(1, int(total * cfg["tiled"]["val_split"]))
+    train_n = total - val_n
+    train_idx = list(range(0,       train_n))
+    val_idx   = list(range(train_n, total))
+    logger.info(f"Total: {total}  train: {len(train_idx)}  val: {len(val_idx)}")
 
     logger.info(f"Saving {len(train_idx)} train samples ...")
     tr_img = tmp_root / "train" / "images"
