@@ -1,0 +1,36 @@
+# config_register.yaml
+# Configuration for: python save_mlflow_wrapper.py
+# Run this AFTER finetune.py has completed.
+
+# ---------------------------------------------------------------------------
+# MLflow
+# ---------------------------------------------------------------------------
+mlflow:
+  tracking_uri:    "http://localhost:5000"   # overridden by env MLFLOW_TRACKING_URI_OUTSIDE
+  experiment_name: "petiole_segmentation"
+  base_model_name: "petiole_vitl16_eomt"    # name to register the model under
+
+# ---------------------------------------------------------------------------
+# Model info — logged to MLflow for traceability
+# ---------------------------------------------------------------------------
+checkpoint:
+  base_model: "dinov3/vitl16-eomt-cityscapes"
+
+# ---------------------------------------------------------------------------
+# Where finetune.py saved the output checkpoint
+# save_mlflow_wrapper.py reads: <out_dir>/checkpoints/best.ckpt
+# ---------------------------------------------------------------------------
+finetune:
+  out_dir: "out_finetuned/petiole_ft"
+
+# ---------------------------------------------------------------------------
+# Pip requirements stored inside the MLflow model artifact
+# ---------------------------------------------------------------------------
+pip_requirements:
+  - "lightly-train==0.13.2"
+  - "numpy==2.2.6"
+  - "torch==2.9.1"
+  - "torchvision==0.24.1"
+  - "pytorch-lightning==2.6.0"
+  - "Pillow"
+  - "mlflow==2.22.0"

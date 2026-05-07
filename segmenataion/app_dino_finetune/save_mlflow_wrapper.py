@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Config loader
 # ---------------------------------------------------------------------------
 
-def load_config(config_path: str = "config.yaml") -> dict:
+def load_config(config_path: str = "config_register.yaml") -> dict:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
     # Allow env-var overrides for sensitive fields
@@ -61,18 +61,23 @@ def register_to_mlflow(cfg: dict) -> tuple[str | None, str | None]:
     Returns:
         (model_name, run_id) on success, (None, None) on failure.
     """
-    tracking_uri    = cfg["mlflow"]["tracking_uri"]
-    experiment_name = cfg["mlflow"]["experiment_name"]
-    model_name      = cfg["mlflow"]["base_model_name"]
-    checkpoint_path = cfg["checkpoint"]["path"]
+    tracking_uri     = cfg["mlflow"]["tracking_uri"]
+    experiment_name  = cfg["mlflow"]["experiment_name"]
+    model_name       = cfg["mlflow"]["base_model_name"]
+    base_model       = cfg["checkpoint"]["base_model"]
+    out_dir          = cfg["finetune"]["out_dir"]
     pip_requirements = cfg["pip_requirements"]
 
-    if not Path(checkpoint_path).exists():
+    # The finetuned checkpoint is saved by lightly_train to out_dir/checkpoints/best.ckpt
+    checkpoint_path = Path(out_dir) / "checkpoints" / "best.ckpt"
+
+    if not checkpoint_path.exists():
         logger.error(f"Checkpoint not found: {checkpoint_path}")
+        logger.error("Run finetune.py first to generate the checkpoint.")
         return None, None
 
-    ckpt_size_mb = Path(checkpoint_path).stat().st_size / 1024 / 1024
-    logger.info(f"Checkpoint size: {ckpt_size_mb:.1f} MB")
+    ckpt_size_mb = checkpoint_path.stat().st_size / 1024 / 1024
+    logger.info(f"Checkpoint: {checkpoint_path} ({ckpt_size_mb:.1f} MB)")
 
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
@@ -83,10 +88,10 @@ def register_to_mlflow(cfg: dict) -> tuple[str | None, str | None]:
         try:
             mlflow.log_params({
                 "model_name":      model_name,
-                "checkpoint_path": checkpoint_path,
+                "checkpoint_path": str(checkpoint_path),
                 "checkpoint_mb":   round(ckpt_size_mb, 2),
                 "task":            "semantic_segmentation",
-                "base_model":      cfg["checkpoint"]["base_model"],
+                "base_model":      base_model,
             })
             mlflow.set_tags({
                 "task":      "semantic_segmentation",
@@ -97,7 +102,7 @@ def register_to_mlflow(cfg: dict) -> tuple[str | None, str | None]:
             mlflow.pyfunc.log_model(
                 artifact_path="model",
                 python_model=LightlySegWrapper(),
-                artifacts={"checkpoint": checkpoint_path},
+                artifacts={"checkpoint": str(checkpoint_path)},
                 registered_model_name=model_name,
                 pip_requirements=pip_requirements,
                 code_path=["lightly_mlflow_wrapper.py"],
@@ -119,7 +124,7 @@ def register_to_mlflow(cfg: dict) -> tuple[str | None, str | None]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--config", default="config_register.yaml")
     args = parser.parse_args()
 
     cfg = load_config(args.config)

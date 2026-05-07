@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # Config loader
 # ---------------------------------------------------------------------------
 
-def load_config(config_path: str = "config.yaml") -> dict:
+def load_config(config_path: str = "config_finetune.yaml") -> dict:
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
@@ -58,15 +58,16 @@ def load_config(config_path: str = "config.yaml") -> dict:
         "MLFLOW_TRACKING_URI_OUTSIDE", cfg["mlflow"]["tracking_uri"]
     )
     tiled = cfg["tiled"]
-    tiled["uri"]     = os.getenv("DATA_TILED_URI", tiled.get("uri", ""))
-    tiled["api_key"] = os.getenv("DATA_TILED_KEY", tiled.get("api_key"))
+    tiled["images_uri"] = os.getenv("DATA_TILED_URI_IMAGES", tiled.get("images_uri", ""))
+    tiled["masks_uri"]  = os.getenv("DATA_TILED_URI_MASKS",  tiled.get("masks_uri",  ""))
+    tiled["api_key"]    = os.getenv("TILED_API_KEY",         tiled.get("api_key"))
 
     os.environ["MLFLOW_TRACKING_USERNAME"] = os.getenv("MLFLOW_TRACKING_USERNAME", "")
     os.environ["MLFLOW_TRACKING_PASSWORD"] = os.getenv("MLFLOW_TRACKING_PASSWORD", "")
 
     # Resolve scratch paths — expand ${SCRATCH} if present
     scratch_default = os.getenv("SCRATCH", tempfile.gettempdir())
-    for key in ("data_dir", "mlflow_cache_dir"):
+    for key in ("data_dir",):
         raw = cfg["scratch"][key]
         cfg["scratch"][key] = raw.replace("${SCRATCH}", scratch_default)
 
@@ -75,41 +76,29 @@ def load_config(config_path: str = "config.yaml") -> dict:
         os.environ.get("SLURM_NNODES", cfg["finetune"]["num_nodes"])
     )
 
+    # Set lightly_train / torch cache directories
+    cache = cfg["cache"]
+    os.environ["LIGHTLY_TRAIN_CACHE_DIR"]       = cache["lightly_train_cache_dir"]
+    os.environ["LIGHTLY_TRAIN_MODEL_CACHE_DIR"] = cache["lightly_train_model_cache_dir"]
+    os.environ["TORCH_HOME"]                    = cache["torch_home"]
+
     return cfg
 
 
 # ---------------------------------------------------------------------------
-# Step 1 — download checkpoint from MLflow
+# Step 1 — resolve base model
 # ---------------------------------------------------------------------------
 
-def download_checkpoint(cfg: dict) -> Path:
+def get_base_model(cfg: dict) -> str:
     """
-    Downloads the latest version of the registered base model from MLflow
-    and returns the local path to the extracted .ckpt file.
+    Returns the lightly_train model name from config.
+    lightly_train will download the pretrained weights automatically to
+    LIGHTLY_TRAIN_MODEL_CACHE_DIR if not already cached.
     """
-    tracking_uri = cfg["mlflow"]["tracking_uri"]
-    model_name   = cfg["mlflow"]["base_model_name"]
-    cache_dir    = Path(cfg["scratch"]["mlflow_cache_dir"])
-
-    mlflow.set_tracking_uri(tracking_uri)
-    model_uri = f"models:/{model_name}/latest"
-    logger.info(f"Downloading checkpoint from MLflow: {model_uri}")
-
-    local_path = mlflow.artifacts.download_artifacts(
-        artifact_uri=model_uri,
-        dst_path=str(cache_dir),
-    )
-
-    # pyfunc artifact layout: <local_path>/model/artifacts/checkpoint/*.ckpt
-    ckpt_files = list(Path(local_path).rglob("*.ckpt"))
-    if not ckpt_files:
-        raise FileNotFoundError(
-            f"No .ckpt file found under downloaded artifacts at {local_path}"
-        )
-
-    ckpt_path = ckpt_files[0]
-    logger.info(f"Checkpoint ready at: {ckpt_path}")
-    return ckpt_path
+    base_model = cfg["checkpoint"]["base_model"]
+    logger.info(f"Base model: {base_model}")
+    logger.info(f"Cache dir : {cfg['cache']['lightly_train_model_cache_dir']}")
+    return base_model
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +141,11 @@ def prepare_data(cfg: dict) -> tuple[str, str, str, str]:
     Returns (train_img_dir, train_msk_dir, val_img_dir, val_msk_dir).
     """
     tiled_cfg = cfg["tiled"]
-    logger.info(f"Connecting to Tiled at {tiled_cfg['uri']} ...")
-    client       = from_uri(tiled_cfg["uri"], api_key=tiled_cfg["api_key"])
-    tiled_images = client[tiled_cfg["images_key"]]
-    tiled_masks  = client[tiled_cfg["masks_key"]]
+    api_key   = tiled_cfg["api_key"]
+    logger.info(f"Connecting to images container: {tiled_cfg['images_uri']}")
+    tiled_images = from_uri(tiled_cfg["images_uri"], api_key=api_key)
+    logger.info(f"Connecting to masks container : {tiled_cfg['masks_uri']}")
+    tiled_masks  = from_uri(tiled_cfg["masks_uri"],  api_key=api_key)
 
     tmp_root = Path(cfg["scratch"]["data_dir"])
 
@@ -206,7 +196,7 @@ def wait_for_data(cfg: dict) -> tuple[str, str, str, str]:
 
 def finetune(
     cfg: dict,
-    ckpt_path: Path,
+    base_model: str,
     tr_img: str,
     tr_msk: str,
     va_img: str,
@@ -214,27 +204,27 @@ def finetune(
 ) -> Path:
     """
     Calls lightly_train.train_semantic_segmentation() and returns the path
-    to the best checkpoint.
+    to the best checkpoint saved under cfg["finetune"]["out_dir"].
+    lightly_train downloads the pretrained weights automatically if not cached.
     """
     ft      = cfg["finetune"]
     dataset = cfg["dataset"]
 
     logger.info("=" * 60)
     logger.info("Starting finetuning")
-    logger.info(f"  base checkpoint : {ckpt_path}")
-    logger.info(f"  out             : {ft['out_dir']}")
-    logger.info(f"  steps           : {ft['steps']}")
-    logger.info(f"  batch_size      : {ft['batch_size']}")
-    logger.info(f"  num_nodes       : {ft['num_nodes']}")
-    logger.info(f"  devices         : {ft['devices']}")
+    logger.info(f"  base_model : {base_model}")
+    logger.info(f"  out        : {ft['out_dir']}")
+    logger.info(f"  steps      : {ft['steps']}")
+    logger.info(f"  batch_size : {ft['batch_size']}")
+    logger.info(f"  num_nodes  : {ft['num_nodes']}")
+    logger.info(f"  devices    : {ft['devices']}")
     logger.info("=" * 60)
 
     lightly_train.train_semantic_segmentation(
         out=ft["out_dir"],
-        # Passing the checkpoint path as `model` is the official finetuning
-        # pattern — lightly_train loads weights from the ckpt and starts a
-        # fresh optimizer (see train_task_helpers.load_checkpoint)
-        model=str(ckpt_path),
+        # lightly_train downloads pretrained weights to LIGHTLY_TRAIN_MODEL_CACHE_DIR
+        # if not already present, then finetunes from them.
+        model=base_model,
         steps=ft["steps"],
         devices=ft["devices"],
         num_nodes=ft["num_nodes"],
@@ -258,7 +248,8 @@ def finetune(
     )
 
     best_ckpt = Path(ft["out_dir"]) / "checkpoints" / "best.ckpt"
-    logger.info(f"Finetuning complete. Best checkpoint: {best_ckpt}")
+    logger.info(f"Finetuning complete.")
+    logger.info(f"Best checkpoint saved to: {best_ckpt}")
     return best_ckpt
 
 
@@ -269,10 +260,10 @@ def finetune(
 def register_finetuned(cfg: dict, best_ckpt: Path) -> None:
     tracking_uri    = cfg["mlflow"]["tracking_uri"]
     experiment_name = cfg["mlflow"]["experiment_name"]
-    model_name      = cfg["mlflow"]["finetuned_model_name"]
-    base_model_name = cfg["mlflow"]["base_model_name"]
+    model_name       = cfg["mlflow"]["finetuned_model_name"]
+    base_model_arch  = cfg["checkpoint"]["base_model"]
     pip_requirements = cfg["pip_requirements"]
-    ft              = cfg["finetune"]
+    ft               = cfg["finetune"]
 
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
@@ -282,18 +273,17 @@ def register_finetuned(cfg: dict, best_ckpt: Path) -> None:
     with mlflow.start_run(run_name=run_name) as run:
         try:
             mlflow.log_params({
-                "base_model_registry": base_model_name,
-                "base_model_arch":     cfg["checkpoint"]["base_model"],
-                "finetuned_model":     model_name,
-                "steps":               ft["steps"],
-                "batch_size":          ft["batch_size"],
-                "num_nodes":           ft["num_nodes"],
+                "base_model_arch":  base_model_arch,
+                "finetuned_model":  model_name,
+                "steps":            ft["steps"],
+                "batch_size":       ft["batch_size"],
+                "num_nodes":        ft["num_nodes"],
             })
             mlflow.set_tags({
                 "task":            "semantic_segmentation",
                 "framework":       "lightly_train",
                 "finetune":        "true",
-                "base_model_arch": cfg["checkpoint"]["base_model"],
+                "base_model_arch": base_model_arch,
             })
 
             mlflow.pyfunc.log_model(
@@ -319,7 +309,7 @@ def register_finetuned(cfg: dict, best_ckpt: Path) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--config", default="config_finetune.yaml")
     args = parser.parse_args()
 
     cfg  = load_config(args.config)
@@ -329,23 +319,19 @@ if __name__ == "__main__":
     # Rank 0: download checkpoint + dump Tiled data to shared scratch
     # Other ranks: wait for sentinel, then pick up the same paths
     # ------------------------------------------------------------------
-    if rank == 0:
-        ckpt_path = download_checkpoint(cfg)
-        # Share the ckpt path with other ranks via a text file
-        tmp_root = Path(cfg["scratch"]["data_dir"])
-        tmp_root.mkdir(parents=True, exist_ok=True)
-        (tmp_root / "ckpt_path.txt").write_text(str(ckpt_path))
+    # base_model is just a string — same on all ranks, no download needed here
+    base_model = get_base_model(cfg)
 
+    if rank == 0:
         tr_img, tr_msk, va_img, va_msk = prepare_data(cfg)
     else:
         tr_img, tr_msk, va_img, va_msk = wait_for_data(cfg)
-        tmp_root  = Path(cfg["scratch"]["data_dir"])
-        ckpt_path = Path((tmp_root / "ckpt_path.txt").read_text().strip())
 
     # ------------------------------------------------------------------
     # All ranks finetune together (DDP across nodes / GPUs)
+    # lightly_train downloads pretrained weights on rank 0 and caches them
     # ------------------------------------------------------------------
-    best_ckpt = finetune(cfg, ckpt_path, tr_img, tr_msk, va_img, va_msk)
+    best_ckpt = finetune(cfg, base_model, tr_img, tr_msk, va_img, va_msk)
 
     # ------------------------------------------------------------------
     # Rank 0: register the finetuned model back to MLflow
