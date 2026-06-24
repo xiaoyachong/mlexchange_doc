@@ -1,0 +1,16 @@
+FROM node:20-slim
+
+RUN useradd -m appuser
+
+WORKDIR /app
+
+COPY finch/package*.json ./
+RUN npm ci
+
+COPY finch/ ./
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

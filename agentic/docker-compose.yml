@@ -1,0 +1,122 @@
+# docker-compose.yml — FORGE Graph full stack
+#
+# All Python services share one image (built from Dockerfile).
+# Each service overrides CMD to run its specific server.
+#
+# Usage:
+#   docker compose up                    # full stack
+#   docker compose up tiled api          # subset
+#   docker compose build                 # rebuild image
+#   docker compose down                  # stop everything
+#   docker compose logs -f               # tail all logs
+
+services:
+
+  # ── Tiled (scientific data catalog) ──────────────────────────────────────
+  tiled:
+    build: .
+    command: >
+      /bin/sh -c "tiled serve catalog /catalog/catalog.db
+      -r /catalog/data
+      --api-key $$TILED_API_KEY
+      --host 0.0.0.0 --port 8010"
+    ports:
+      - "127.0.0.1:8010:8010"
+    environment:
+      TILED_API_KEY: ${TILED_API_KEY}
+      TILED_DATA_DIR: /catalog/data
+    volumes:
+      - ./:/catalog
+    healthcheck:
+      test: ["CMD", "curl", "-sf",
+             "-H", "Authorization: Apikey ${TILED_API_KEY}",
+             "http://localhost:8010/api/v1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 9
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── FastAPI / Browse API ──────────────────────────────────────────────────
+  api:
+    build: .
+    command: >
+      python -m uvicorn tiled_agentic.api_server:app
+      --host 0.0.0.0 --port 8002
+    ports:
+      - "127.0.0.1:8002:8002"
+    env_file: .env
+    environment:
+      TILED_URI: http://tiled:8010
+      SPLASH_LINKS_URL: http://host.docker.internal:8080
+    depends_on:
+      tiled:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── GIWAXS reduction API ──────────────────────────────────────────────────
+  giwaxs:
+    build: .
+    command: >
+      /bin/sh -c "cd /app/gixsgui_api && python -m uvicorn app.main:app
+      --host 0.0.0.0 --port 8003"
+    working_dir: /app/gixsgui_api
+    ports:
+      - "127.0.0.1:8003:8003"
+    env_file: .env
+    volumes:
+      - ./gixsgui_api/data/giwaxs.db:/app/gixsgui_api/data/giwaxs.db
+    depends_on:
+      tiled:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── ALS Knowledge Agent ───────────────────────────────────────────────────
+  agent:
+    build: .
+    command: >
+      python -m uvicorn als_knowledge_agent.server:app
+      --host 0.0.0.0 --port 8004
+    ports:
+      - "127.0.0.1:8004:8004"
+    env_file: .env
+    environment:
+      KNOWLEDGE_GRAPH_PATH: /app/als_knowledge_agent/data/knowledge_graph.json
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      SPLASH_LINKS_URL: http://host.docker.internal:8080
+    volumes:
+      - ./als_knowledge_agent/data:/app/als_knowledge_agent/data
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ── Finch React frontend ──────────────────────────────────────────────────
+  finch:
+    build:
+      context: .
+      dockerfile: Dockerfile.finch  # Node image — must stay separate
+    ports:
+      - "127.0.0.1:5173:5173"
+    env_file: .env
+    environment:
+      VITE_GIWAXS_API: http://localhost:8003
+      SPLASH_LINKS_URL: http://host.docker.internal:8080
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ── MCP standalone server (optional — for Claude Desktop) ────────────────
+  mcp:
+    build: .
+    command: python -m tiled_agentic.mcp_standalone_server
+    ports:
+      - "127.0.0.1:8001:8001"
+    env_file: .env
+    environment:
+      TILED_URI: http://tiled:8010
+    depends_on:
+      tiled:
+        condition: service_healthy
+    profiles:
+      - mcp
+    restart: unless-stopped
