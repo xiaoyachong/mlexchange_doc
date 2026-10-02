@@ -1,0 +1,77 @@
+# Child-flow deployments only. There is no parent flow / parent_pool any more:
+# the Job API (../job_api) resolves jobs and submits these deployments directly.
+name: mlex_prefect_worker
+prefect-version: 3.4.2
+
+build: null
+push: null
+
+pull:
+- prefect.deployments.steps.set_working_directory:
+    directory: '{{ $PREFECT_WORK_DIR }}'
+
+deployments:
+- name: launch_conda
+  version: 0.2.0
+  tags: []
+  concurrency_limit: null
+  description: Launch conda environment
+  entrypoint: flows/conda/conda_flows.py:launch_conda
+  parameters: {}
+  work_pool:
+    name: conda_pool
+    work_queue_name: default-queue
+    job_variables: {}
+  schedules: []
+
+- name: launch_docker
+  version: 0.2.0
+  tags: []
+  concurrency_limit: null
+  description: Launch docker job
+  entrypoint: flows/docker/docker_flows.py:launch_docker
+  parameters: {}
+  work_pool:
+    name: docker_pool
+    work_queue_name: default-queue
+    job_variables: {}
+  schedules: []
+
+- name: launch_podman
+  version: 0.2.0
+  tags: []
+  concurrency_limit: null
+  description: Launch podman container
+  entrypoint: flows/podman/podman_flows.py:launch_podman
+  parameters: {}
+  work_pool:
+    name: podman_pool
+    work_queue_name: default-queue
+    job_variables: {}
+  schedules: []
+
+- name: launch_slurm
+  version: 0.2.0
+  tags: []
+  concurrency_limit: null
+  description: Launch slurm job (worker on the cluster login node)
+  entrypoint: flows/slurm/slurm_flows.py:launch_slurm
+  parameters: {}
+  work_pool:
+    name: slurm_pool
+    work_queue_name: default-queue
+    job_variables: {}
+  schedules: []
+
+- name: launch_sfapi
+  version: 0.2.0
+  tags: []
+  concurrency_limit: null
+  description: Launch job on NERSC Perlmutter via SFAPI or IRI API
+  entrypoint: flows/sfapi/sfapi_flows.py:launch_sfapi
+  parameters: {}
+  work_pool:
+    name: sfapi_pool
+    work_queue_name: default-queue
+    job_variables: {}
+  schedules: []

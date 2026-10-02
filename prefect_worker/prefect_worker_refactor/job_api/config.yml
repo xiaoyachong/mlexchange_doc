@@ -1,0 +1,70 @@
+# Job API configuration (replaces the parent worker's config.yml).
+# ${VAR} values are expanded from the Job API's environment at startup.
+# NOTE: paths under container/slurm/sfapi are paths on the machine where that
+# child worker (or NERSC job) runs, not on the Job API host.
+
+job_api:
+  # Target used when a request does not name one
+  default_target: "als"
+  # Targets clients are allowed to request
+  allowed_targets: ["als", "nersc", "conda"]
+  # Per-step resource overrides a client may send (applied to slurm/sfapi steps)
+  allowed_resource_overrides: ["max_time", "num_nodes"]
+
+# Target name -> child flow type
+targets:
+  als: "docker"
+  nersc: "sfapi"
+  nersc-slurm: "slurm"
+  nsls-ii: "podman"
+  conda: "conda"
+
+# Conda environment per MLflow model (conda and slurm targets)
+conda:
+  conda_env_name:
+    DLSIA MSDNet_0.0.1: "dlsia"
+    DLSIA TUNet_0.0.1: "dlsia"
+    DLSIA TUNet3+_0.0.1: "dlsia"
+    DLSIA MSDNet_0.1.0: "dlsia_0.1.0"
+    DLSIA TUNet_0.1.0: "dlsia_0.1.0"
+    DLSIA TUNet3+_0.1.0: "dlsia_0.1.0"
+
+# Docker / Podman worker settings (paths on the docker/podman worker host)
+container:
+  volumes:
+    - "${TILED_STORAGE_DIR}:/tiled_storage"
+  network: "${CONTAINER_NETWORK}"
+
+# Slurm worker settings (worker runs on the cluster login node)
+slurm:
+  num_nodes: 1
+  partitions: ["p_cpu1", "p_cpu2"]
+  reservations: ["r_cpu1", "r_cpu2"]
+  max_time: "1:00:00"
+  forward_ports: ["8888:8888"]
+  submission_ssh_key: "~/.ssh/id_rsa"
+
+# NERSC Perlmutter settings (sfapi worker)
+sfapi:
+  # "sfapi"  -> Superfacility API (PATH_NERSC_CLIENT_ID / PATH_NERSC_PRI_KEY on the worker)
+  # "iriapi" -> IRI API with a Globus token (NERSC_USERNAME / PATH_GLOBUS_TOKEN_FILE on the worker)
+  login_method: "sfapi"
+  iri:
+    api_base_url: "https://api.iri.nersc.gov"
+    job_resource: "3cf3c048-855e-4dd8-a189-065a483954bb"
+    status_resource: "compute"
+    login_resource: "e525a224-61c1-419f-9642-91168c792e39"
+  machine: "perlmutter"
+  queue: "realtime"      # realtime needs NERSC approval; use debug/regular otherwise
+  account: "als"
+  constraint: "cpu"      # GPU models (MLflow is_gpu_enabled=True) switch to gpu automatically
+  num_nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 64
+  gpus_per_node: 4
+  max_time: "0:15:00"
+  exclusive: true
+  working_dir: ""
+  output_dir: ""
+  error_dir: ""
+  volumes: []            # podman-hpc mounts, paths ON PERLMUTTER
