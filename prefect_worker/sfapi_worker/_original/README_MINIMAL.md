@@ -1,16 +1,5 @@
 # SFAPI Worker - Minimal Changes Package
 
-> **Install:** run `./INSTALL.sh /path/to/mlex_prefect_worker` from this folder. It copies
-> `sfapi_flow/` to `flows/sfapi/`, replaces the modified files (after backing them up), and adds
-> `start_sfapi_child_worker*.sh`. The `new_files/`, `modified_files/` and `patches/` folders mentioned
-> below are not part of this package. Only Perlmutter is supported because Cori is retired.
->
-> **Login method:** set `sfapi.login_method` in `config.yml` to `sfapi` (Iris client id + key,
-> `PATH_NERSC_CLIENT_ID` / `PATH_NERSC_PRI_KEY`) or `iriapi` (Globus token, `NERSC_USERNAME` +
-> `PATH_GLOBUS_TOKEN_FILE`). For `iriapi`, log in once on the worker host with
-> `python flows/sfapi/globus_token.py --validate-iri`; the worker then refreshes the token itself.
-
-
 This package contains only the **NEW** and **MODIFIED** files needed to add SFAPI support to your existing mlex_prefect_worker project.
 
 ## Files to Add (New)
@@ -237,7 +226,7 @@ job_details = {
 # ADD THIS SECTION at the end:
 # SFAPI (NERSC Superfacility API) settings
 sfapi:
-  machine: "perlmutter"  # NERSC machine (only perlmutter)
+  machine: "perlmutter"  # NERSC machine (perlmutter, cori)
   queue: "realtime"      # SLURM queue/QOS (realtime, debug, preempt)
   account: "als"         # NERSC account to charge
   constraint: "cpu"      # Node constraint (cpu, gpu)

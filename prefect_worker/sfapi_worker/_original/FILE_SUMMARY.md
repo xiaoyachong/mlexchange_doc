@@ -1,11 +1,5 @@
 # SFAPI Worker Files - Summary
 
-> **Install:** run `./INSTALL.sh /path/to/mlex_prefect_worker` from this folder. It copies
-> `sfapi_flow/` to `flows/sfapi/`, replaces the modified files (after backing them up), and adds
-> `start_sfapi_child_worker*.sh`. The `new_files/`, `modified_files/` and `patches/` folders mentioned
-> below are not part of this package. Only Perlmutter is supported because Cori is retired.
-
-
 ## Package Structure
 
 ```

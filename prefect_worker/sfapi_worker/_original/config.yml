@@ -33,28 +33,18 @@ slurm:
   forward_ports: '["8888:8888"]'
   submission_ssh_key: "~/.ssh/id_rsa"
 
-# NERSC (Perlmutter) settings, used when worker.name is "nersc"
+# SFAPI (NERSC Superfacility API) settings
 sfapi:
-  # Login method: "sfapi"  -> Superfacility API, needs PATH_NERSC_CLIENT_ID / PATH_NERSC_PRI_KEY
-  #               "iriapi" -> IRI API with a Globus token, needs NERSC_USERNAME and a token file
-  #                           (PATH_GLOBUS_TOKEN_FILE) created by: python flows/sfapi/globus_token.py
-  login_method: "sfapi"
-  iri:                   # Only used when login_method is "iriapi" (same ids as splash_flows config.yml)
-    api_base_url: "https://api.iri.nersc.gov"
-    job_resource: "3cf3c048-855e-4dd8-a189-065a483954bb"    # perlmutter_job_submit
-    status_resource: "compute"                              # compute_resource
-    login_resource: "e525a224-61c1-419f-9642-91168c792e39"  # perlmutter_login
-  machine: "perlmutter"  # NERSC machine (only perlmutter; Cori is retired)
-  queue: "realtime"      # SLURM QOS (realtime needs NERSC approval; use debug/regular otherwise)
+  machine: "perlmutter"  # NERSC machine (perlmutter, cori)
+  queue: "realtime"      # SLURM queue/QOS (realtime, debug, preempt)
   account: "als"         # NERSC account to charge
-  constraint: "cpu"      # Node constraint for CPU algorithms (GPU algorithms switch to gpu automatically)
+  constraint: "cpu"      # Node constraint (cpu, gpu)
   num_nodes: 1
   ntasks_per_node: 1
   cpus_per_task: 64
-  gpus_per_node: 4       # Used only when the MLflow model has is_gpu_enabled=True
   max_time: "0:15:00"    # Format: HH:MM:SS
   exclusive: true        # Request exclusive node access
   working_dir: ""        # Working directory on NERSC (empty = default pscratch)
   output_dir: ""         # Output log directory (empty = default pscratch/job_logs)
   error_dir: ""          # Error log directory (empty = default pscratch/job_logs)
-  volumes: []            # podman-hpc mounts, paths ON PERLMUTTER, e.g. "/pscratch/sd/x/xchong/data:/tiled_storage"
+  volumes: []            # Additional volume mounts for container

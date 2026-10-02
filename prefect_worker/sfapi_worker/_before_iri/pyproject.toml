@@ -20,9 +20,7 @@ dependencies = [
     "python-dotenv",
     "sfapi-client>=0.4.0",
     "authlib>=1.2.0",
-    "pyyaml",
-    "globus-sdk>=3.0",
-    "httpx"
+    "pyyaml"
 ]
 
 [project.optional-dependencies]

@@ -1,16 +1,37 @@
+"""Prefect child flow that runs an MLExchange algorithm on NERSC Perlmutter.
+
+Two login methods are supported (``SFAPIParams.login_method``), mirroring
+splash_flows/orchestration/flows/bl832/nersc.py:
+
+- ``sfapi``  : NERSC Superfacility API. Iris client id + private key
+               (``PATH_NERSC_CLIENT_ID`` / ``PATH_NERSC_PRI_KEY``).
+- ``iriapi`` : NERSC IRI API. Globus bearer token cached in a token file
+               (``PATH_GLOBUS_TOKEN_FILE``, default ~/.globus/auth_tokens.json),
+               created once by ``python flows/sfapi/globus_token.py``.
+
+The worker can run anywhere with HTTPS access to NERSC. Each flow run:
+  1. creates the log / params directories on NERSC (Slurm needs the log
+     directory to exist *before* the job starts);
+  2. submits a job that writes the params YAML (mode 600), runs the container
+     with podman-hpc, and removes the params file on exit;
+  3. waits for a terminal state and fails the flow run unless it completed.
+"""
+
 import json
 import logging
 import os
-import re
-import tempfile
+import shlex
 import time
+from pathlib import Path
 
+import httpx
 import yaml
 from authlib.jose import JsonWebKey
 from prefect import context, flow
 from prefect.states import Failed
 from sfapi_client import Client
 from sfapi_client.compute import Machine
+from sfapi_client.jobs import JobState
 
 from flows.credentials import add_credentials_to_io_parameters
 from flows.logger import setup_logger
@@ -18,299 +39,376 @@ from flows.sfapi.schema import SFAPIParams
 
 logger = logging.getLogger(__name__)
 
+# Path of the params file inside the container
+CONTAINER_PARAMS_PATH = "/app/work/config/params.yaml"
 
-def create_sfapi_client() -> Client:
-    """
-    Create and return an NERSC SFAPI client instance.
-    
-    Requires environment variables:
-    - PATH_NERSC_CLIENT_ID: Path to file containing SFAPI client ID
-    - PATH_NERSC_PRI_KEY: Path to file containing SFAPI private key (JSON)
-    
-    Returns:
-        Authenticated SFAPI Client instance
-    """
-    client_id_path = os.getenv("PATH_NERSC_CLIENT_ID")
-    client_secret_path = os.getenv("PATH_NERSC_PRI_KEY")
-
-    if not client_id_path or not client_secret_path:
-        logger.error("NERSC credentials paths are missing.")
-        raise ValueError("Missing NERSC credentials paths in environment variables.")
-    
-    if not os.path.isfile(client_id_path) or not os.path.isfile(client_secret_path):
-        logger.error("NERSC credential files are missing.")
-        raise FileNotFoundError("NERSC credential files are missing.")
-
-    with open(client_id_path, "r") as f:
-        client_id = f.read().strip()
-
-    with open(client_secret_path, "r") as f:
-        client_secret = JsonWebKey.import_key(json.loads(f.read()))
-
-    try:
-        client = Client(client_id, client_secret)
-        logger.info("NERSC SFAPI client created successfully.")
-        return client
-    except Exception as e:
-        logger.error(f"Failed to create NERSC SFAPI client: {e}")
-        raise e
+IRI_POLL_SECONDS = 60
+IRI_FAILED_STATES = ("failed", "canceled", "cancelled", "timeout")
 
 
-def build_slurm_script(sfapi_params: SFAPIParams, params_file_path: str) -> str:
-    """
-    Build a SLURM batch script for NERSC execution.
-    
-    Args:
-        sfapi_params: SFAPI job parameters
-        params_file_path: Path to temporary parameters file on NERSC
-        
-    Returns:
-        Complete SLURM batch script as a string
-    """
-    user = os.getenv("USER", "unknown")
-    
-    # Determine output/error directories
-    output_dir = sfapi_params.output_dir or f"/pscratch/sd/{user[0]}/{user}/job_logs"
-    error_dir = sfapi_params.error_dir or f"/pscratch/sd/{user[0]}/{user}/job_logs"
-    
-    # Build volume mount arguments
-    volume_args = ""
-    if sfapi_params.volumes:
-        for volume in sfapi_params.volumes:
-            volume_args += f"--volume {volume} \\\n"
-    
-    # Add params file mount
-    volume_args += f"--volume {params_file_path}:/app/work/config/params.yaml \\\n"
-    
-    # Build the command with params file
-    container_command = f"{sfapi_params.command} /app/work/config/params.yaml"
-    
-    # Determine working directory
-    working_dir = sfapi_params.working_dir or f"/pscratch/sd/{user[0]}/{user}"
-    
-    # Build SLURM script - IMPORTANT: must be left-aligned
-    script = f"""#!/bin/bash
-#SBATCH -q {sfapi_params.queue}
-#SBATCH -A {sfapi_params.account}
-#SBATCH -C {sfapi_params.constraint}
-#SBATCH --job-name={sfapi_params.job_name}
-#SBATCH --output={output_dir}/%x_%j.out
-#SBATCH --error={error_dir}/%x_%j.err
-#SBATCH -N {sfapi_params.num_nodes}
-#SBATCH --ntasks-per-node {sfapi_params.ntasks_per_node}
-#SBATCH --cpus-per-task {sfapi_params.cpus_per_task}
-#SBATCH --time={sfapi_params.max_time}
-"""
-    
-    if sfapi_params.exclusive:
-        script += "#SBATCH --exclusive\n"
-    
-    script += f"""
+# --------------------------------------------------------------------------- #
+# Script building (shared by both login methods)
+# --------------------------------------------------------------------------- #
+def resolve_paths(sfapi_params: SFAPIParams, nersc_user: str) -> dict:
+    """Resolve working/log/params directories on NERSC for ``nersc_user``."""
+    scratch = f"/pscratch/sd/{nersc_user[0]}/{nersc_user}"
+    return {
+        "working_dir": sfapi_params.working_dir or scratch,
+        "output_dir": sfapi_params.output_dir or f"{scratch}/mlex_job_logs",
+        "error_dir": sfapi_params.error_dir or f"{scratch}/mlex_job_logs",
+        "params_dir": f"{scratch}/mlex_temp",
+    }
+
+
+def build_job_body(
+    sfapi_params: SFAPIParams,
+    paths: dict,
+    params_file_path: str,
+    params_yaml: str,
+) -> str:
+    """Build the shell body of the job (everything after the #SBATCH lines)."""
+    podman_args = []
+    if sfapi_params.gpus_per_node > 0:
+        podman_args.append("--gpu")
+    for volume in sfapi_params.volumes or []:
+        podman_args.append(f"--volume {volume}")
+    podman_args.append(f"--volume {params_file_path}:{CONTAINER_PARAMS_PATH}:ro")
+
+    image = f"{sfapi_params.image_name}:{sfapi_params.image_tag}"
+    container_command = f"{sfapi_params.command} {CONTAINER_PARAMS_PATH}"
+    podman_line = (
+        "srun podman-hpc run --rm "
+        + " ".join(podman_args)
+        + f" {image} bash -c {shlex.quote(container_command)}"
+    )
+
+    return f"""set -o pipefail
 date
-echo "Working directory: {working_dir}"
-cd {working_dir}
 
-echo "Creating log directories..."
-mkdir -p {output_dir}
-mkdir -p {error_dir}
+# Params contain API keys: keep them private and always remove them on exit
+umask 077
+mkdir -p {paths['params_dir']}
+trap 'rm -f {params_file_path}' EXIT
+cat > {params_file_path} << 'PARAMS_EOF'
+{params_yaml}
+PARAMS_EOF
+chmod 600 {params_file_path}
 
-echo "Running container with podman-hpc..."
-srun podman-hpc run \\
-{volume_args}{sfapi_params.image_name}:{sfapi_params.image_tag} \\
-bash -c "{container_command}"
-
+cd {paths['working_dir']}
+echo "Running {image} with podman-hpc..."
+{podman_line}
 exit_code=$?
+
 date
 echo "Container exit code: $exit_code"
 exit $exit_code
 """
-    
-    return script
 
 
+def build_slurm_script(sfapi_params: SFAPIParams, paths: dict, body: str) -> str:
+    """Prepend #SBATCH directives to ``body`` (used by the SFAPI backend)."""
+    sbatch = [
+        "#!/bin/bash",
+        f"#SBATCH -q {sfapi_params.queue}",
+        f"#SBATCH -A {sfapi_params.account}",
+        f"#SBATCH -C {sfapi_params.constraint}",
+        f"#SBATCH --job-name={sfapi_params.job_name}",
+        f"#SBATCH --output={paths['output_dir']}/%x_%j.out",
+        f"#SBATCH --error={paths['error_dir']}/%x_%j.err",
+        f"#SBATCH -N {sfapi_params.num_nodes}",
+        f"#SBATCH --ntasks-per-node={sfapi_params.ntasks_per_node}",
+        f"#SBATCH --cpus-per-task={sfapi_params.cpus_per_task}",
+        f"#SBATCH --time={sfapi_params.max_time}",
+    ]
+    if sfapi_params.gpus_per_node > 0:
+        sbatch.append(f"#SBATCH --gpus-per-node={sfapi_params.gpus_per_node}")
+    if sfapi_params.exclusive:
+        sbatch.append("#SBATCH --exclusive")
+    return "\n".join(sbatch) + "\n\n" + body
+
+
+def walltime_to_seconds(max_time: str) -> int:
+    """Convert ``[H]H:MM:SS`` or ``MM:SS`` to seconds."""
+    parts = [int(p) for p in max_time.split(":")]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    hours, minutes, seconds = parts
+    return hours * 3600 + minutes * 60 + seconds
+
+
+# --------------------------------------------------------------------------- #
+# Backends
+# --------------------------------------------------------------------------- #
+class SfapiBackend:
+    """Submit and monitor jobs through the NERSC Superfacility API."""
+
+    name = "sfapi"
+
+    def __init__(self, sfapi_params: SFAPIParams):
+        self.params = sfapi_params
+        self.client = self._create_client()
+        self.compute = self.client.compute(Machine(sfapi_params.machine.lower()))
+
+    @staticmethod
+    def _create_client() -> Client:
+        client_id_path = os.getenv("PATH_NERSC_CLIENT_ID")
+        client_secret_path = os.getenv("PATH_NERSC_PRI_KEY")
+        if not client_id_path or not client_secret_path:
+            raise ValueError(
+                "PATH_NERSC_CLIENT_ID and PATH_NERSC_PRI_KEY must be set for login_method=sfapi."
+            )
+        if not os.path.isfile(client_id_path) or not os.path.isfile(client_secret_path):
+            raise FileNotFoundError("NERSC SFAPI credential files are missing.")
+        with open(client_id_path, "r") as f:
+            client_id = f.read().strip()
+        with open(client_secret_path, "r") as f:
+            client_secret = JsonWebKey.import_key(json.loads(f.read()))
+        return Client(client_id, client_secret)
+
+    def close(self) -> None:
+        self.client.close()
+
+    def username(self) -> str:
+        return self.client.user().name
+
+    def mkdir(self, dirs: list[str]) -> None:
+        self.compute.run(f"mkdir -p {' '.join(dirs)}")
+
+    def submit(self, paths: dict, body: str, run_id: str) -> str:
+        job = self.compute.submit_job(build_slurm_script(self.params, paths, body))
+        return str(job.jobid)
+
+    def log_hint(self, paths: dict, job_id: str, run_id: str) -> str:
+        return f"{paths['output_dir']}/{self.params.job_name}_{job_id}.out"
+
+    def wait(self, job_id: str) -> tuple[bool, str]:
+        """Wait for a terminal state. complete() does NOT raise on FAILED."""
+        for attempt in range(5):
+            try:
+                job = self.compute.job(jobid=job_id)
+                state = job.complete()
+                return state == JobState.COMPLETED, str(state)
+            except Exception as e:
+                # SFAPI sometimes reports "Job not found" right after submission
+                if "Job not found" not in str(e) or attempt == 4:
+                    raise
+                logger.warning(f"Job {job_id} not found yet, retrying ({attempt + 1}/5)")
+                time.sleep(30)
+        return False, "UNKNOWN"
+
+
+class IriBackend:
+    """Submit and monitor jobs through the NERSC IRI API (Globus token)."""
+
+    name = "iriapi"
+
+    def __init__(self, sfapi_params: SFAPIParams):
+        self.params = sfapi_params
+        self.client = httpx.Client(
+            base_url=sfapi_params.iri_api_base_url,
+            headers={"Authorization": f"Bearer {self._access_token()}"},
+            timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0),
+        )
+
+    @staticmethod
+    def _access_token() -> str:
+        """Return a valid IRI access token without ever prompting for login.
+
+        Uses the cached token if still valid, otherwise refreshes it with the
+        stored refresh token. A worker cannot answer a browser login, so if
+        refreshing fails the run fails with instructions instead of hanging.
+        """
+        from flows.sfapi import globus_token as gt
+
+        token_file_env = os.getenv("PATH_GLOBUS_TOKEN_FILE")
+        token_file = Path(token_file_env) if token_file_env else gt.DEFAULT_TOKEN_FILE
+        login_hint = (
+            f"Log in once on the worker host: python flows/sfapi/globus_token.py "
+            f"--token-file {token_file} --validate-iri"
+        )
+
+        stored = gt.load_tokens(token_file)
+        if not stored:
+            raise FileNotFoundError(f"No Globus token file at {token_file}. {login_hint}")
+
+        try:
+            iri_token = gt.get_iri_token(stored)
+            if time.time() < iri_token.get("expires_at_seconds", 0) - 60:
+                return iri_token["access_token"]
+        except RuntimeError:
+            pass
+
+        client = gt.globus_sdk.NativeAppAuthClient(gt.CLIENT_ID)
+        refreshed, _ = gt.refresh_stored_tokens(client, stored)
+        if refreshed is None:
+            raise RuntimeError(f"Globus token refresh failed. {login_hint}")
+        iri_token = gt.validate_auth_data(refreshed)
+        gt.save_tokens(token_file, refreshed)
+        return iri_token["access_token"]
+
+    def close(self) -> None:
+        self.client.close()
+
+    def username(self) -> str:
+        username = os.getenv("NERSC_USERNAME")
+        if not username:
+            raise ValueError("NERSC_USERNAME must be set for login_method=iriapi.")
+        return username
+
+    def mkdir(self, dirs: list[str]) -> None:
+        for path in dirs:
+            response = self.client.post(
+                f"/api/v1/filesystem/mkdir/{self.params.iri_login_resource}",
+                json={"path": path, "parents": True},
+            )
+            response.raise_for_status()
+
+    def _log_paths(self, paths: dict, run_id: str) -> tuple[str, str]:
+        stem = f"{self.params.job_name}_{run_id}"
+        return f"{paths['output_dir']}/{stem}.out", f"{paths['error_dir']}/{stem}.err"
+
+    def submit(self, paths: dict, body: str, run_id: str) -> str:
+        p = self.params
+        resources = {
+            "node_count": p.num_nodes,
+            "processes_per_node": p.ntasks_per_node,
+            "exclusive_node_use": p.exclusive,
+        }
+        if p.gpus_per_node > 0:
+            resources["gpu_cores_per_process"] = p.gpus_per_node
+        else:
+            resources["cpu_cores_per_process"] = p.cpus_per_task
+
+        stdout_path, stderr_path = self._log_paths(paths, run_id)
+        # Same job-spec shape as splash_flows' IRIAPI branch of _submit_job
+        job_spec = {
+            "executable": "/bin/bash",
+            "arguments": ["-s"],
+            "pre_launch": body,
+            "resources": resources,
+            "attributes": {
+                "duration": walltime_to_seconds(p.max_time),
+                "queue_name": p.queue,
+                "account": p.account,
+                "custom_attributes": {"constraint": p.constraint},
+            },
+            "stdout_path": stdout_path,
+            "stderr_path": stderr_path,
+        }
+        response = self.client.post(
+            f"/api/v1/compute/job/{p.iri_job_resource}", json=job_spec
+        )
+        if not response.is_success:
+            # Do not log job_spec: pre_launch contains API keys
+            logger.error(f"IRI job submission failed: {response.status_code} {response.text}")
+        response.raise_for_status()
+        return str(response.json()["id"])
+
+    def log_hint(self, paths: dict, job_id: str, run_id: str) -> str:
+        return self._log_paths(paths, run_id)[0]
+
+    def wait(self, job_id: str) -> tuple[bool, str]:
+        while True:
+            url = f"/api/v1/compute/status/{self.params.iri_status_resource}/{job_id}"
+            response = self.client.get(url)
+            if response.status_code == 401:
+                # Access tokens are short-lived; long jobs outlive them. Refresh and retry.
+                self.client.headers["Authorization"] = f"Bearer {self._access_token()}"
+                response = self.client.get(url)
+            response.raise_for_status()
+            state = str(response.json().get("status", {}).get("state", "")).lower()
+            logger.info(f"IRI job {job_id} state: {state}")
+            if state == "completed":
+                return True, state
+            if state in IRI_FAILED_STATES:
+                return False, state
+            time.sleep(IRI_POLL_SECONDS)
+
+
+BACKENDS = {SfapiBackend.name: SfapiBackend, IriBackend.name: IriBackend}
+
+
+def create_backend(sfapi_params: SFAPIParams):
+    """Instantiate the backend selected by ``sfapi_params.login_method``."""
+    try:
+        backend_cls = BACKENDS[sfapi_params.login_method]
+    except KeyError:
+        raise ValueError(
+            f"Unknown login_method {sfapi_params.login_method!r}; use one of {list(BACKENDS)}"
+        )
+    return backend_cls(sfapi_params)
+
+
+# --------------------------------------------------------------------------- #
+# Flow
+# --------------------------------------------------------------------------- #
 @flow(name="SFAPI flow")
-async def launch_sfapi(
+def launch_sfapi(
     sfapi_params: SFAPIParams,
     prev_flow_run_id: str = "",
 ):
-    """
-    Launch a job on NERSC using the Superfacility API (SFAPI).
-    
+    """Launch a job on NERSC via SFAPI or the IRI API.
+
+    Synchronous on purpose: both clients block while polling.
+
     Args:
-        sfapi_params: SFAPI job parameters
-        prev_flow_run_id: Previous flow run ID for chaining jobs
-        
+        sfapi_params: Job parameters (``login_method`` selects the API).
+        prev_flow_run_id: Previous flow run ID for chaining jobs.
+
     Returns:
-        Current flow run ID on success, Failed state on error
+        Current flow run ID on success, a Failed state otherwise.
     """
-    logger = setup_logger()
-    
-    logger.info(f"Starting SFAPI job submission: {sfapi_params.job_name}")
-    logger.info(f"Target machine: {sfapi_params.machine}")
-    logger.info(f"Image: {sfapi_params.image_name}:{sfapi_params.image_tag}")
-    
-    # Handle previous flow run ID
-    if (
-        prev_flow_run_id != ""
-        and sfapi_params.params.get("io_parameters", {}).get("uid_retrieve") == ""
-    ):
-        if "io_parameters" not in sfapi_params.params:
-            sfapi_params.params["io_parameters"] = {}
-        sfapi_params.params["io_parameters"]["uid_retrieve"] = prev_flow_run_id
-    
-    # Get current flow run ID
+    flow_logger = setup_logger()
+    flow_logger.info(
+        f"NERSC job {sfapi_params.job_name} via {sfapi_params.login_method} on "
+        f"{sfapi_params.machine}: {sfapi_params.image_name}:{sfapi_params.image_tag}"
+    )
+
+    io_params = sfapi_params.params.setdefault("io_parameters", {})
+    if prev_flow_run_id and not io_params.get("uid_retrieve"):
+        io_params["uid_retrieve"] = prev_flow_run_id
+
     current_flow_run_id = str(context.get_run_context().flow_run.id)
-    
-    # Append current flow run ID
-    if "io_parameters" not in sfapi_params.params:
-        sfapi_params.params["io_parameters"] = {}
-    sfapi_params.params["io_parameters"]["uid_save"] = current_flow_run_id
-    
-    # Add credentials to io_parameters at the child flow level
+    io_params["uid_save"] = current_flow_run_id
+
     sfapi_params.params = add_credentials_to_io_parameters(sfapi_params.params)
-    
-    # Create SFAPI client
-    try:
-        client = create_sfapi_client()
-    except Exception as e:
-        logger.error(f"Failed to create SFAPI client: {e}")
-        return Failed(message=f"SFAPI client creation failed: {e}")
-    
-    # Get the target machine
-    try:
-        machine_map = {
-            "perlmutter": Machine.perlmutter,
-            "cori": Machine.cori,
-        }
-        machine = machine_map.get(sfapi_params.machine.lower())
-        if not machine:
-            raise ValueError(f"Unknown machine: {sfapi_params.machine}")
-        
-        compute = client.compute(machine)
-        logger.info(f"Connected to {sfapi_params.machine}")
-    except Exception as e:
-        logger.error(f"Failed to connect to machine: {e}")
-        return Failed(message=f"Machine connection failed: {e}")
-    
-    # Create temporary file for parameters on NERSC filesystem
-    user = client.user()
-    temp_dir = f"/pscratch/sd/{user.name[0]}/{user.name}/mlex_temp"
-    params_filename = f"params_{current_flow_run_id}.yaml"
-    params_file_path = f"{temp_dir}/{params_filename}"
-    
-    # Create temporary local file first
-    with tempfile.NamedTemporaryFile(mode="w+t", suffix=".yaml", delete=False) as temp_file:
-        yaml.dump(sfapi_params.params, temp_file)
-        local_params_path = temp_file.name
-    
-    try:
-        # TODO: Upload params file to NERSC using SFAPI or assume it's accessible
-        # For now, we'll assume the params are small enough to include in the script
-        # In production, you might want to use Globus or scp to transfer the file
-        
-        logger.info(f"Parameters file would be at: {params_file_path}")
-        logger.info(f"Local params file: {local_params_path}")
-        
-        # Build SLURM script
-        job_script = build_slurm_script(sfapi_params, params_file_path)
-        logger.info("Generated SLURM batch script")
-        
-        # Note: Since we can't easily upload the params file via SFAPI,
-        # we'll embed the params in the job script as a workaround
-        with open(local_params_path, 'r') as f:
-            params_content = f.read()
-        
-        # Modify script to create params file inline
-        setup_commands = f"""
-echo "Creating temporary directory..."
-mkdir -p {temp_dir}
 
-echo "Creating parameters file..."
-cat > {params_file_path} << 'PARAMS_EOF'
-{params_content}
-PARAMS_EOF
+    backend = None
+    try:
+        backend = create_backend(sfapi_params)
+        paths = resolve_paths(sfapi_params, backend.username())
+        params_file_path = f"{paths['params_dir']}/params_{current_flow_run_id}.yaml"
 
-chmod 644 {params_file_path}
-"""
-        
-        # Insert setup commands after the SBATCH directives
-        lines = job_script.split('\n')
-        sbatch_end = 0
-        for i, line in enumerate(lines):
-            if line.strip() and not line.strip().startswith('#SBATCH') and not line.strip().startswith('#!'):
-                sbatch_end = i
-                break
-        
-        lines.insert(sbatch_end, setup_commands)
-        job_script = '\n'.join(lines)
-        
-        logger.info("Submitting job to NERSC...")
-        job = compute.submit_job(job_script)
-        job_id = job.jobid
-        logger.info(f"Job submitted successfully with ID: {job_id}")
-        
-        # Initial update to get job state
-        try:
-            job.update()
-            logger.info(f"Job {job_id} initial state: {job.state}")
-        except Exception as update_err:
-            logger.warning(f"Initial job update failed, continuing: {update_err}")
-        
-        # Wait a bit before checking status
-        time.sleep(10)
-        
-        # Monitor and wait for job completion
-        logger.info(f"Waiting for job {job_id} to complete...")
-        try:
-            job.complete()  # This blocks until job completes
-            logger.info(f"Job {job_id} completed successfully")
-            
-            # Clean up temporary params file
-            cleanup_script = f"rm -f {params_file_path}"
-            try:
-                # Note: SFAPI doesn't have a direct way to run cleanup commands
-                # In production, you might schedule a cleanup job or use ssh
-                logger.info(f"Cleanup command (manual): {cleanup_script}")
-            except Exception as cleanup_err:
-                logger.warning(f"Cleanup warning: {cleanup_err}")
-            
-            return current_flow_run_id
-            
-        except Exception as e:
-            logger.error(f"Error during job execution: {e}")
-            
-            # Try to recover job if it's a "Job not found" error
-            match = re.search(r"Job not found:\s*(\d+)", str(e))
-            if match:
-                recovered_job_id = match.group(1)
-                logger.info(f"Attempting to recover job {recovered_job_id}...")
-                try:
-                    job = compute.job(jobid=recovered_job_id)
-                    time.sleep(30)
-                    job.complete()
-                    logger.info(f"Job {recovered_job_id} completed after recovery")
-                    return current_flow_run_id
-                except Exception as recovery_err:
-                    logger.error(f"Failed to recover job {recovered_job_id}: {recovery_err}")
-                    return Failed(message=f"Job recovery failed: {recovery_err}")
-            else:
-                return Failed(message=f"Job execution failed: {e}")
-    
+        backend.mkdir(sorted({paths["output_dir"], paths["error_dir"], paths["params_dir"]}))
+
+        body = build_job_body(
+            sfapi_params, paths, params_file_path, yaml.safe_dump(sfapi_params.params)
+        )
+        job_id = backend.submit(paths, body, current_flow_run_id)
+        flow_logger.info(f"Submitted NERSC job {job_id}")
+        flow_logger.info(f"Logs: {backend.log_hint(paths, job_id, current_flow_run_id)}")
+
+        ok, final_state = backend.wait(job_id)
+    except Exception as e:
+        flow_logger.error(f"NERSC job failed: {e}")
+        return Failed(message=f"NERSC job failed: {e}")
     finally:
-        # Clean up local temporary file
-        try:
-            os.unlink(local_params_path)
-        except Exception as e:
-            logger.warning(f"Failed to clean up local temp file: {e}")
+        if backend is not None:
+            backend.close()
+
+    if not ok:
+        msg = f"NERSC job {job_id} ended in state {final_state}"
+        flow_logger.error(msg)
+        return Failed(message=msg)
+
+    flow_logger.info(f"NERSC job {job_id} completed")
+    return current_flow_run_id
 
 
 if __name__ == "__main__":
-    import asyncio
-    
-    # Example usage
     test_params = SFAPIParams(
         job_name="test_mlex_job",
-        machine="perlmutter",
+        login_method="sfapi",
         queue="debug",
         account="als",
         num_nodes=1,
@@ -318,7 +416,6 @@ if __name__ == "__main__":
         image_name="ghcr.io/mlexchange/mlex_dlsia_segmentation_prototype",
         image_tag="latest",
         command="python src/train.py",
-        params={"test": "data"}
+        params={"test": "data"},
     )
-    
-    asyncio.run(launch_sfapi(test_params))
+    launch_sfapi(test_params)

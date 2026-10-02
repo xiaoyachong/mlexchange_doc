@@ -1,8 +1,15 @@
-# Add these lines to your .env file:
+# Add these lines to your .env file.
+# Set ONE group depending on sfapi.login_method in config.yml.
 
-# NERSC SFAPI Configuration
-# =========================
-# Path to file containing SFAPI client ID
+# --- login_method: "sfapi" (NERSC Superfacility API) ---
+# Iris SFAPI client id and private key (JWK JSON). Keep both chmod 600.
+# The key must allow job submission; it is usually IP-restricted to this host and expires.
 PATH_NERSC_CLIENT_ID=/path/to/nersc_client_id.txt
-# Path to file containing SFAPI private key (JSON format)
 PATH_NERSC_PRI_KEY=/path/to/nersc_private_key.json
+
+# --- login_method: "iriapi" (NERSC IRI API, Globus token) ---
+# Your NERSC username (used for /pscratch paths)
+NERSC_USERNAME=<nersc_username>
+# Token file created once with: python flows/sfapi/globus_token.py --validate-iri
+# (default if unset: ~/.globus/auth_tokens.json)
+PATH_GLOBUS_TOKEN_FILE=/path/to/.globus/auth_tokens.json

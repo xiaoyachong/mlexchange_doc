@@ -33,17 +33,8 @@ slurm:
   forward_ports: '["8888:8888"]'
   submission_ssh_key: "~/.ssh/id_rsa"
 
-# NERSC (Perlmutter) settings, used when worker.name is "nersc"
+# SFAPI (NERSC Superfacility API) settings
 sfapi:
-  # Login method: "sfapi"  -> Superfacility API, needs PATH_NERSC_CLIENT_ID / PATH_NERSC_PRI_KEY
-  #               "iriapi" -> IRI API with a Globus token, needs NERSC_USERNAME and a token file
-  #                           (PATH_GLOBUS_TOKEN_FILE) created by: python flows/sfapi/globus_token.py
-  login_method: "sfapi"
-  iri:                   # Only used when login_method is "iriapi" (same ids as splash_flows config.yml)
-    api_base_url: "https://api.iri.nersc.gov"
-    job_resource: "3cf3c048-855e-4dd8-a189-065a483954bb"    # perlmutter_job_submit
-    status_resource: "compute"                              # compute_resource
-    login_resource: "e525a224-61c1-419f-9642-91168c792e39"  # perlmutter_login
   machine: "perlmutter"  # NERSC machine (only perlmutter; Cori is retired)
   queue: "realtime"      # SLURM QOS (realtime needs NERSC approval; use debug/regular otherwise)
   account: "als"         # NERSC account to charge

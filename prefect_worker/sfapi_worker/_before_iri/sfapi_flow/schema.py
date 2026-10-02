@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -8,26 +8,6 @@ class SFAPIParams(BaseModel):
     Parameters for SFAPI (NERSC Superfacility API) job execution.
     """
     job_name: str = Field(description="Name of the SLURM job")
-    login_method: Literal["sfapi", "iriapi"] = Field(
-        description="NERSC API: 'sfapi' (Iris client key) or 'iriapi' (Globus token)",
-        default="sfapi",
-    )
-    iri_api_base_url: str = Field(
-        description="IRI API base URL (login_method=iriapi)",
-        default="https://api.iri.nersc.gov",
-    )
-    iri_job_resource: str = Field(
-        description="IRI resource id for Perlmutter job submission",
-        default="3cf3c048-855e-4dd8-a189-065a483954bb",
-    )
-    iri_status_resource: str = Field(
-        description="IRI resource id used for job status",
-        default="compute",
-    )
-    iri_login_resource: str = Field(
-        description="IRI resource id for Perlmutter login (filesystem ops)",
-        default="e525a224-61c1-419f-9642-91168c792e39",
-    )
     machine: str = Field(
         description="NERSC machine to run on (currently only 'perlmutter')",
         default="perlmutter"

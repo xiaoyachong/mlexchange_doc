@@ -28,8 +28,7 @@ echo "Backup written to $backup"
 
 # New module
 mkdir -p "$TARGET/flows/sfapi"
-cp "$SRC/sfapi_flow/__init__.py" "$SRC/sfapi_flow/schema.py" "$SRC/sfapi_flow/sfapi_flows.py" \
-   "$SRC/sfapi_flow/globus_token.py" "$TARGET/flows/sfapi/"
+cp "$SRC/sfapi_flow/__init__.py" "$SRC/sfapi_flow/schema.py" "$SRC/sfapi_flow/sfapi_flows.py" "$TARGET/flows/sfapi/"
 
 # Modified files
 cp "$SRC/parent_flow.py" "$TARGET/flows/parent_flow.py"
@@ -56,7 +55,5 @@ echo
 echo "Next steps:"
 echo "  cd $TARGET && pip install ."
 echo "  set worker.name: \"nersc\" in config.yml and fill in the sfapi: section"
-echo "  choose sfapi.login_method: \"sfapi\" or \"iriapi\""
-echo "  for iriapi, log in once:  python flows/sfapi/globus_token.py --validate-iri"
 echo "  ./start_parent_worker.sh            # terminal 1"
 echo "  ./start_sfapi_child_worker.sh       # terminal 2"

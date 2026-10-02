@@ -232,8 +232,6 @@ def get_algorithm_details_from_mlflow(model_name: str, config: dict):
             "submission_ssh_key": config.get("slurm", {}).get("submission_ssh_key", ""),
             "forward_ports": config.get("slurm", {}).get("forward_ports", "[]"),
             # SFAPI settings
-            "sfapi_login_method": config.get("sfapi", {}).get("login_method", "sfapi"),
-            "sfapi_iri": config.get("sfapi", {}).get("iri", {}) or {},
             "sfapi_machine": config.get("sfapi", {}).get("machine", "perlmutter"),
             "sfapi_queue": config.get("sfapi", {}).get("queue", "realtime"),
             "sfapi_account": config.get("sfapi", {}).get("account", "als"),
@@ -242,13 +240,6 @@ def get_algorithm_details_from_mlflow(model_name: str, config: dict):
             "sfapi_output_dir": config.get("sfapi", {}).get("output_dir", ""),
             "sfapi_error_dir": config.get("sfapi", {}).get("error_dir", ""),
             "sfapi_exclusive": config.get("sfapi", {}).get("exclusive", True),
-            "sfapi_num_nodes": config.get("sfapi", {}).get("num_nodes", 1),
-            "sfapi_ntasks_per_node": config.get("sfapi", {}).get("ntasks_per_node", 1),
-            "sfapi_cpus_per_task": config.get("sfapi", {}).get("cpus_per_task", 64),
-            "sfapi_gpus_per_node": config.get("sfapi", {}).get("gpus_per_node", 4),
-            "sfapi_max_time": config.get("sfapi", {}).get("max_time", "0:15:00"),
-            # Paths must exist on Perlmutter, so do NOT reuse the local container volumes
-            "sfapi_volumes": config.get("sfapi", {}).get("volumes", []) or [],
             # Get conda environment based on the model type and version from tags
             "conda_env": _get_conda_env_for_model(model_name, config, algorithm_version)
         }

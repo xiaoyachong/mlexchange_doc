@@ -232,8 +232,6 @@ def get_algorithm_details_from_mlflow(model_name: str, config: dict):
             "submission_ssh_key": config.get("slurm", {}).get("submission_ssh_key", ""),
             "forward_ports": config.get("slurm", {}).get("forward_ports", "[]"),
             # SFAPI settings
-            "sfapi_login_method": config.get("sfapi", {}).get("login_method", "sfapi"),
-            "sfapi_iri": config.get("sfapi", {}).get("iri", {}) or {},
             "sfapi_machine": config.get("sfapi", {}).get("machine", "perlmutter"),
             "sfapi_queue": config.get("sfapi", {}).get("queue", "realtime"),
             "sfapi_account": config.get("sfapi", {}).get("account", "als"),

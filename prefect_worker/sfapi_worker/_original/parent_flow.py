@@ -291,35 +291,22 @@ async def launch_parent_flow(params_list: list[dict]):
                 # Build job name
                 job_name = f"{model_name.replace(' ', '_')}_{task_name}_{folder_name}"[:50]  # SLURM job name limit
                 
-                # GPU algorithms (MLflow tag is_gpu_enabled) need a GPU node
-                is_gpu = algorithm_details.get("is_gpu_enabled", False)
-                constraint = "gpu" if is_gpu else job_details.get("sfapi_constraint", "cpu")
-                gpus_per_node = job_details.get("sfapi_gpus_per_node", 4) if is_gpu else 0
-
-                # IRI API resource ids (only used when login_method is "iriapi");
-                # unset keys fall back to the SFAPIParams defaults
-                iri_cfg = job_details.get("sfapi_iri", {})
-                iri_params = {f"iri_{key}": value for key, value in iri_cfg.items() if value}
-
                 # Get SFAPI configuration from job_details
                 sfapi_relevant_params = {
                     "job_name": job_name,
-                    "login_method": job_details.get("sfapi_login_method", "sfapi"),
-                    **iri_params,
                     "machine": job_details.get("sfapi_machine", "perlmutter"),
                     "queue": job_details.get("sfapi_queue", "realtime"),
                     "account": job_details.get("sfapi_account", "als"),
-                    "constraint": constraint,
-                    "num_nodes": job_details.get("sfapi_num_nodes", 1),
-                    "ntasks_per_node": job_details.get("sfapi_ntasks_per_node", 1),
-                    "cpus_per_task": job_details.get("sfapi_cpus_per_task", 64),
-                    "gpus_per_node": gpus_per_node,
-                    "max_time": job_details.get("sfapi_max_time", "0:15:00"),
+                    "constraint": job_details.get("sfapi_constraint", "cpu"),
+                    "num_nodes": job_details.get("num_nodes", 1),
+                    "ntasks_per_node": 1,
+                    "cpus_per_task": 64,
+                    "max_time": job_details.get("max_time", "0:15:00"),
                     "exclusive": job_details.get("sfapi_exclusive", True),
                     "image_name": algorithm_details["image_name"],
                     "image_tag": algorithm_details["image_tag"],
                     "command": f"python {python_file}",
-                    "volumes": job_details.get("sfapi_volumes", []),
+                    "volumes": job_details.get("volumes", []),
                     "working_dir": job_details.get("sfapi_working_dir", ""),
                     "output_dir": job_details.get("sfapi_output_dir", ""),
                     "error_dir": job_details.get("sfapi_error_dir", ""),
@@ -335,10 +322,7 @@ async def launch_parent_flow(params_list: list[dict]):
                         sfapi_params.params["io_parameters"] = {}
                     sfapi_params.params["io_parameters"]["uid_retrieve"] = flow_run_id
                 
-                prefect_logger.info(
-                    f"Submitting NERSC job {job_name} to {sfapi_params.machine} "
-                    f"via {sfapi_params.login_method}"
-                )
+                prefect_logger.info(f"Submitting SFAPI job: {job_name} to {sfapi_params.machine}")
                 
                 # Run the SFAPI deployment with parameters
                 deployment_data = {
