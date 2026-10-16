@@ -1,3 +1,5 @@
+> **Superseded:** Shelley runs vLLM (`glm-5.3-flash` on port 8000), not Ollama. Use `README_shelley_vllm.md` instead.
+
 # Use the Ollama model on Shelley from forge_rsoxs_analysis on your Mac
 
 An SSH tunnel makes Shelley's Ollama appear on your Mac as if it were running locally.
